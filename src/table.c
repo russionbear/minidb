@@ -285,6 +285,23 @@ int m_rows_fields(FILE *fp, u_int8_t is_read, struct D_base* base, int page_inde
 }
 
 
+inline int get_field_size(struct D_field* field){
+    switch (field->type) {
+        case CHAR:
+        case BOOL: return 1;
+
+        case INT: return 4;
+
+        case LONG:
+        case FLOAT:
+        case DOUBLE:
+        case BLOB: return 8;
+
+        case STRING: return field->length;
+        default:
+            return 0;
+    }
+}
 
 int count_row_size(struct D_field* fields, int field_len, int table_id){
     // 计算一条记录需要的内存
@@ -307,6 +324,18 @@ int count_row_size(struct D_field* fields, int field_len, int table_id){
     return k;
 }
 
+int get_rest_table_index(struct D_base* base, int start_index){
+    int i;
+    for(i=start_index;;i++)
+        if(base->tables[i].table_id==0)
+            return i;
+}
+int get_rest_field_index(struct D_base* base, int start_index){
+    int i;
+    for(i=start_index;;i++)
+        if(base->fields[i].table_id==0)
+            return i;
+}
 
 int create_database(char *name){
     u_int64_t rlt=0;
@@ -320,10 +349,10 @@ int create_database(char *name){
     struct D_base db;
     memset(&db, 0, sizeof(db));
     strncpy(db.name, name, sizeof(db.name));
-    rlt = fwrite(&db, sizeof(db), 1, fp);
+    rlt = m_base(fp, 0, &db);
     fclose(fp);
 
-    if(rlt!=1){
+    if(rlt!=0){
 #ifdef OPEN_LOG
         syslog(LOG_ERR, "create_db %ld, %ld\n", sizeof(struct D_base), rlt);
 #endif
@@ -339,406 +368,294 @@ int delete_database(char *name){
     return 1;
 }
 
-int load_database(char* name, struct D_context * ctx){
-    int rlt=0, i, j;
+int load_database(char* name, struct D_base* base){
+    int rlt=0;
     FILE *fp;
 
-    if(name==0||ctx==0)
+    if(name==0||base==0)
         return 3;
 
     if((fp=fopen(name, "rb"))==0)
         return 1;
-
-    if((rlt=fread(&ctx->database, sizeof(struct D_base), 1, fp))!=1){
-#ifdef OPEN_LOG
-        syslog(LOG_ERR, "load_database %ld, %d\n", sizeof(struct D_base), rlt);
-#endif
-        fclose(fp);
-        return 2;
-    }
-
-    ctx->fields = calloc(ctx->database.field_nu, sizeof(struct D_field));
-    ctx->tables = calloc(ctx->database.table_nu, sizeof(struct D_table));
-
-
-    if(ctx->database.table_nu!=0&&((rlt=fread(ctx->tables, sizeof(struct D_table), ctx->database.table_nu, fp))!=ctx->database.table_nu)){
-#ifdef OPEN_LOG
-        syslog(LOG_ERR, "2222");
-#endif
-        fclose(fp);
-        free(ctx->fields);
-        free(ctx->tables);
-        ctx->fields = 0;
-        ctx->tables = 0;
-        return 2;
-    }
-
-    fseek(fp, sizeof(struct D_base)+MAX_TABLE_NU*sizeof(struct D_table), SEEK_SET);
-    if(ctx->database.field_nu!=0&&((rlt=fread(ctx->fields, sizeof(struct D_field), ctx->database.field_nu, fp))!=ctx->database.field_nu)){
-#ifdef OPEN_LOG
-        syslog(LOG_ERR, "11111");
-#endif
-        fclose(fp);
-        free(ctx->fields);
-        free(ctx->tables);
-        ctx->fields = 0;
-        ctx->tables = 0;
-        return 1;
-    }
+    rlt = m_base(fp, 1, base);
 
     fclose(fp);
+
+    if(rlt!=0){
+        return 4;
+    }
 
     return 0;
 }
 
 
 // table
+// 内部没有回滚
+int m_create_table(FILE *fp, struct D_base* base, char* table_name, struct D_field* fields, int field_len){
+    int row_size, table_index, field_index, i, j;
+    int64_t rlt;
+    struct D_table * table;
+    if(fp==0||base==0||table_name==0)
+        return 1;
 
-int create_table(struct D_context * ctx, char* table_name, struct D_field* fields, int field_len){
-    int rlt=0;
-    int i, j, k;
-    int table_id_arr[ctx->database.table_nu];
-    FILE *fp;
-    struct D_table *table = calloc(1, sizeof(struct D_table));
-    struct D_table *n_tables;
-    struct D_field *n_fields;
-
-    if(ctx->database.table_nu==MAX_TABLE_NU){
-        return 0x12;
-    }
-    if(ctx->database.field_nu+field_len>MAX_FILED_NU){
-        return 0x13;
+    if((rlt= (int64_t) (fp = fopen(base->name, "r+b")))==0){
+        return 2;
     }
 
-    // 查重
-    for(i=0;i<ctx->database.table_nu;i++)
-        if(strcmp(ctx->tables[i].name, table_name)==0)
-            return 5;
-    for(i=0;i<field_len;i++)
-        if(fields[i].name[0] == 0)
-            return 7;
+    // table_name 查重
+    if(base->table_nu!=0){
+        for(i=0, j=0;j<base->table_nu;i++){
+            if(base->tables[i].table_id==0)
+                continue;
+            else{
+                if(strcmp(base->tables[i].name, table_name)==0){
+                    i = -i;
+                    break;
+                }
+                j++;
+            }
+        }
 
-    // has same name
-    for(i=0;i<field_len;i++){
-        for(j=i+1;j<field_len;j++)
-            if(strcmp(fields[i].name, fields[j].name) == 0)
-                return 6;
+        if(i<=0)
+            return 3;
     }
 
-    if(ctx->database.name[0] == 0)
-        return 3;
+    row_size = count_row_size(fields, field_len, 0);
+    table_index = get_rest_table_index(base, 0);
+    table = &base->tables[table_index];
 
-    
-    // alloc table_id
     memset(table, 0, sizeof(struct D_table));
     strncpy(table->name, table_name, sizeof(char)* strlen(table_name));
-    for(i=0;i<ctx->database.table_nu;i++){
-        table_id_arr[i] = ctx->tables->table_id;
+    table->name[sizeof(char)* strlen(table_name)] = '\0';
+    table->row_size = row_size;
+    table->table_id = table_index+1;
+    rlt = m_table(fp, 0, base, table->table_id-1);
+
+    if(rlt!=0){
+        memset(table, 0, sizeof(struct D_table));
+        return 3;
     }
 
-    table->table_id = get_random(0b1111, 0b1111+MAX_TABLE_NU, table_id_arr, ctx->database.table_nu);
-//    table->row_size = count_row_size(fields, field_len, 0);
-    for(i=0;i<field_len;i++)
+    // 预处理field
+    for(i=0;i<field_len;i++){
+        if(fields[i].name[0]==0){
+            return 7;
+        }
+        for(j=i+1;j<field_len;j++)
+            if(strcmp(fields[i].name, fields[j].name)==0)
+                return 3;
+
         fields[i].table_id = table->table_id;
-
-    if((fp=fopen(ctx->database.name, "r+b"))==0)
-        return 1;
-
-    // write table
-    if((rlt=fwrite(table, sizeof(struct D_table), 1, fp))!=1){
-        return 2;
+        fields[i].filed_size = get_field_size(&fields[i]);
     }
 
-    // write field
-    fseek(fp, (long)(sizeof(ctx->database)+sizeof(struct D_table)*MAX_TABLE_NU+sizeof(struct D_field)+ctx->database.field_nu), SEEK_SET);
-    if((rlt=fwrite(fields, sizeof(struct D_table), field_len, fp)) != field_len){
-        return 2;
+    field_index = 0;
+    for(i=0;i<field_len;i++){
+        field_index = get_rest_field_index(base, field_index);
+        fields[i].field_id = field_index + 1;
+        memcpy(base->fields+field_index, fields+i, sizeof(struct D_field));
+        rlt = m_field(fp, 0, base, field_index);
+        if(rlt!=0){
+            return 8;
+        }
     }
-    
-    fclose(fp);
 
-    // update context
-    n_tables = calloc(ctx->database.table_nu+1, sizeof(struct D_table));
-    n_fields = calloc(ctx->database.field_nu + field_len, sizeof(struct D_field));
-    memcpy(n_tables, ctx->tables, sizeof(struct D_table)*ctx->database.table_nu);
-    n_tables[ctx->database.table_nu] = *table;
-    ctx->database.table_nu ++;
-    free(ctx->tables);
-    ctx->tables = n_tables;
-
-    memcpy(n_fields, ctx->tables, sizeof(struct D_table) * ctx->database.table_nu);
-    for(i=0;i<field_len;i++)
-        n_fields[i + ctx->database.field_nu] = fields[i];
-    ctx->database.field_nu += field_len;
-    free(ctx->fields);
-    ctx->fields = n_fields;
+    //更新 base_info
+    base->table_nu ++;
+    base->field_nu += field_len;
+    if((rlt= m_base_info(fp, 0, base))!=0){
+        base->table_nu -- ;
+        base->field_nu -= field_len;
+        return 3;
+    }
 
     return 0;
 }
 
-
-int delete_table(struct D_context * ctx, char* table_name){
-    int rlt=0;
-    int i, j, k, field_nu;
-    int table_id_arr[ctx->database.table_nu];
-    FILE *fp;
-    struct D_table *n_tables;
-    struct D_field *n_fields;
-
-    if(table_name==0)
-        return 0x11;
-    if(!ctx->database.table_nu){
+int m_delete_table(FILE *fp, struct D_base* base, char* table_name){
+    int row_size, table_index, field_len, i, j;
+    int64_t rlt;
+    struct D_table * table;
+    if(fp==0||base==0||table_name==0)
         return 1;
-    }
 
-    for(i=0;i<ctx->database.table_nu;i++)
-        if(strcmp(ctx->tables[i].name, table_name)==0){
-            i=-i;
-            break;
-        }
-
-    if(i>0){
-
+    if((rlt= (int64_t) (fp = fopen(base->name, "r+b")))==0){
         return 2;
     }
 
-    for(j=0, k=0; j < ctx->database.field_nu; j++)
-        if(ctx->fields[j].table_id==ctx->tables[-i].table_id)
-            k ++;
-    field_nu = k;
-
-    n_tables = calloc(ctx->database.table_nu-1, sizeof(struct D_table));
-    n_fields = calloc(ctx->database.field_nu - k, sizeof(struct D_field));
-
-    // alloc table_id
-    memcpy(n_tables, ctx->tables, sizeof(struct D_table)*(-i));
-    memcpy(n_tables+(-i), ctx->tables+(-i+1), sizeof(struct D_table)*(ctx->database.table_nu-(-i+1)));
-
-    for(k=0, j=0; k < ctx->database.field_nu; k++){
-        if(ctx->fields[j].table_id==ctx->tables[-i].table_id)
+    // table_name 是否存在
+    for(i=0;j<base->table_nu;i++){
+        if(base->tables[i].table_id==0)
             continue;
-        n_fields[k] = ctx->fields[j++];
+        else{
+            if(strcmp(base->tables[i].name, table_name)==0){
+                i = -i;
+                break;
+            }
+            j++;
+        }
     }
+    if(i>0)
+        return 2;
 
-    if((fp=fopen(ctx->database.name, "r+b"))==0){
-        free(n_tables);
-        free(n_fields);
+    table_index = -i;
+
+    memset(base->tables+table_index, 0, sizeof(struct D_table));
+    rlt = m_table(fp, 0, base, table_index);
+
+    if(rlt!=0){
         return 3;
     }
 
-    // write table
-    fseek(fp, sizeof(struct D_context)+sizeof(struct D_table)*(-i), SEEK_SET);
-    if((rlt=fwrite(n_tables+(-i), sizeof(struct D_table), (ctx->database.table_nu-(-i+1)), fp))!=(ctx->database.table_nu-(-i+1))){
-        free(n_tables);
-        free(n_fields);
-
-        return 4;
+    field_len = 0;
+    for(i=0;j<base->field_nu;i++){
+        if(base->fields[i].field_id==0)
+            continue;
+        else{
+            if(base->fields[i].table_id==table_index+1){
+                m_field(fp, 0, base, i);
+                field_len ++;
+            }
+            j++;
+        }
     }
 
-    // write field
-    fseek(fp, sizeof(ctx->database)+sizeof(struct D_table)*MAX_TABLE_NU, SEEK_SET);
-    if((rlt=fwrite(n_fields, sizeof(struct D_field), ctx->database.field_nu-field_nu, fp)) != ctx->database.field_nu-field_nu){
-        free(n_tables);
-        free(n_fields);
-        return 5;
+    //更新 base_info
+    base->table_nu --;
+    base->field_nu -= field_len;
+    if((rlt= m_base_info(fp, 0, base))!=0){
+        return 3;
     }
-
-    fclose(fp);
-
-    // update context
-    ctx->database.table_nu --;
-    free(ctx->tables);
-    ctx->tables = n_tables;
-
-    ctx->database.field_nu -= field_nu;
-    free(ctx->fields);
-    ctx->fields = n_fields;
-
-    if(ctx->database.table_nu==0)
-        ctx->tables = 0;
-    if(ctx->database.field_nu==0)
-        ctx->fields = 0;
 
     return 0;
 }
 
-int rename_table(struct D_context * ctx, char* old_name, char* new_name){
-    int i,j, rlt;
-    FILE *fp;
+int m_rename_table(FILE *fp, struct D_base* base, char* old_name, char* new_name){
+    int i,j;
+    int64_t rlt;
 
-    if(old_name==0||new_name==0)
-        return 0x1;
-
-    if(!ctx->database.table_nu){
+    if(fp==0||base==0||old_name==0||new_name==0)
         return 1;
-    }
-
-    for(i=0;i<ctx->database.table_nu;i++)
-        if(strcmp(ctx->tables[i].name, old_name)==0){
-            i = -i;
-            break;
+    for(i=0;j<base->table_nu;i++){
+        if(base->tables[0].table_id==0)
+            continue;
+        else{
+            if(strcmp(base->tables[i].name, old_name)==0){
+                i = -i;
+                break;
+            }
+            j++;
         }
-
-    if(i>0){
+    }
+    if(i>0)
         return 2;
-    }
 
-    memcpy(ctx->tables[-i].name, new_name, strlen(new_name)*sizeof(char));
-
-    if((rlt=(fp= fopen(ctx->database.name, "r+b")))==0){
-
+    memcpy(base->tables[i].name, new_name, sizeof(char)* strlen(new_name));
+    if((rlt=m_table(fp, 0, base, i))!=0)
         return 3;
-    }
-
-    fseek(fp, sizeof(struct D_context)+(-1)*sizeof(struct D_table), SEEK_SET);
-    if((rlt=fwrite(&ctx->tables[-i], sizeof(struct D_table), 1, fp))!=1){
-
-        fclose(fp);
-        memcpy(ctx->tables[-i].name, old_name, strlen(old_name)*sizeof(char));
-        return 4;
-    }
-    fclose(fp);
-
     return 0;
 }
 
 
 // about field
 
-int add_field(struct D_context * ctx, int table_id, struct D_field* field){
-    int i=0, rlt;
-    FILE *fp;
+int m_add_field(FILE *fp, struct D_base* base, struct D_field* field){
+    int field_index, table_id;
+    int64_t rlt;
 
-    if(ctx->database.field_nu==MAX_FILED_NU){
-        return 0x12;
-    }
-
-    if(field->name[0]=='\0')
-        return 0x11;
-
-    for(i=0;i<ctx->database.field_nu;i++)
-        if(ctx->fields[i].table_id==table_id&& strcmp(ctx->fields[i].name, field->name) == 0){
-            return 1;
-        }
-
-    field->table_id = table_id;
-    struct D_field *n_fields = calloc(ctx->database.field_nu+1, sizeof(struct D_field));
-    memcpy(n_fields, ctx->fields, sizeof(struct D_field)*ctx->database.field_nu);
-    n_fields[ctx->database.field_nu] = *field;
-
-    if((rlt=(fp=fopen(ctx->database.name, "r+b")))==0){
-        free(n_fields);
-        return 2;
-    }
-    fseek(fp, (long)(sizeof(struct D_context)+MAX_TABLE_NU*sizeof(struct D_table)+sizeof(struct D_field)*ctx->database.field_nu), SEEK_SET);
-    if((rlt=fwrite(field, sizeof(struct D_field), 1, fp))!=1){
-        free(n_fields);
-        fclose(fp);
-        return 3;
-    }
-
-    fclose(fp);
-
-    ctx->database.field_nu ++;
-    free(ctx->fields);
-    ctx->fields = n_fields;
-    return 0;
-}
-
-int delete_field(struct D_context * ctx, int table_id, char * field_name){
-    int i=0, j, rlt;
-    FILE *fp;
-
-    if(field_name==0)
-        return 0x1;
-    if(ctx->database.field_nu==0)
+    if(fp==0||base==0||field==0)
         return 1;
 
-    for(i=0;i<ctx->database.field_nu;i++)
-        if(ctx->fields[i].table_id==table_id&& strcmp(ctx->fields[i].name, field_name) == 0){
-            i=-i;
-            break;
-        }
-
-    if(i>0){
-        return 2;
-    }
-
-    struct D_field *n_fields = calloc(ctx->database.field_nu-1, sizeof(struct D_field));
-    memcpy(n_fields, ctx->fields, sizeof(struct D_field)*(-i));
-
-    for(j=-i+1;j<ctx->database.field_nu;j++)
-        memcpy(&n_fields[j-1], &ctx->fields[j], sizeof(struct D_field));
-
-    if((rlt=(fp=fopen(ctx->database.name, "r+b")))==0){
-
-        free(n_fields);
-        return 2;
-    }
-    fseek(fp, sizeof(struct D_context)+MAX_TABLE_NU*sizeof(struct D_table)+sizeof(struct D_field)*(-i), SEEK_SET);
-    if((rlt=fwrite(ctx->fields+(-i+1), sizeof(struct D_field), ctx->database.field_nu-1-(-i), fp))!=ctx->database.field_nu-1-(-i)){
-        fclose(fp);
-        free(n_fields);
-        return 3;
-    }
-
-    fclose(fp);
-
-    ctx->database.field_nu --;
-    free(ctx->fields);
-    ctx->fields = n_fields;
-
-    if(ctx->database.field_nu==0)
-        ctx->fields = 0;
-    return 0;
-}
-
-int rename_field(struct D_context * ctx, int table_id, char* old_name, char* new_name){
-    int i,j, rlt;
-    FILE *fp;
-
-    if(old_name==0||new_name==0)
-        return 0x1;
-    if(!ctx->database.field_nu){
+    table_id = field->table_id;
+    if(base->tables[table_id-1].table_id!=table_id)
         return 1;
-    }
 
-
-    for(i=0;i<ctx->database.field_nu;i++)
-        if(ctx->fields[i].table_id==table_id&&strcmp(ctx->fields[i].name, new_name)==0){
-            return 0x1;
-        }
-
-    for(i=0;i<ctx->database.field_nu;i++)
-        if(ctx->fields[i].table_id==table_id&&strcmp(ctx->fields[i].name, old_name)==0){
-            i = -i;
-            break;
-        }
-
-    if(i>0){
-        return 2;
-    }
-
-    memcpy(ctx->fields[-i].name, new_name, strlen(new_name)*sizeof(char));
-
-    if((rlt=(fp= fopen(ctx->database.name, "r+b")))==0){
-        memcpy(ctx->fields[-i].name, old_name, strlen(old_name)*sizeof(char));
-        return 3;
-    }
-
-    fseek(fp, (long)(sizeof(struct D_context)+MAX_TABLE_NU*sizeof(struct D_table)+(-i)*sizeof(struct D_field)), SEEK_SET);
-    if((rlt=fwrite(&ctx->fields[-i], sizeof(struct D_field), 1, fp))!=1){
-
-        fclose(fp);
-        memcpy(ctx->fields[-i].name, old_name, strlen(old_name)*sizeof(char));
+    field_index = get_rest_field_index(base, 0);
+    memcpy(base->fields+field_index, field, sizeof(struct D_field));
+    rlt = m_field(fp, 0, base, field_index);
+    if(rlt!=0)
         return 4;
-    }
-    fclose(fp);
 
-    return 0;
+
+    base->field_nu --;
+    return m_base_info(fp, 0, base);
+}
+
+int m_delete_field(FILE *fp, struct D_base* base, int field_id){
+    int64_t rlt;
+    if(fp==0||base==0||base->fields[field_id-1].field_id!=field_id)
+        return 1;
+
+    memset(base->fields+field_id-1, 0, sizeof(struct D_field));
+    rlt = m_field(fp, 0, base, field_id-1);
+    if(rlt!=0)
+        return 4;
+    base->field_nu --;
+    return m_base_info(fp, 0, base);
+}
+
+int m_rename_field(FILE *fp, struct D_base* base, int field_id, char* new_name){
+    if(fp==0||base==0||new_name==0||base->fields[field_id-1].field_id!=field_id|| strcmp(new_name, base->fields[field_id-1].name)==0)
+        return 1;
+    memcpy(base->fields[field_id-1].name, new_name, sizeof (char)* strlen(new_name));
+    return m_field(fp, 0, base, field_id-1);
 }
 
 // row
+int m_check_rows_unique_field(FILE *fp, struct D_base* base, int table_id, int *unique_field_offset_size, int field_len, int row_length, char* data){
+    int row_size, row_begin_offset, page_size, tmp_field_size;
+    int i, j, k, h, h1;
+    char* tmp_data = data;
+    char* tmp_data2, *tmp_data3;
+    struct D_page *page;
+    if(fp==0||base==0||data==0){
+        return 1;
+    }
+
+    row_size = base->tables[table_id-1].row_size;
+    page_size = (int32_t)(sizeof(struct D_page) + PAGE_SIZE/row_size * sizeof(u_int8_t));
+    tmp_field_size = 0;
+    for(i=0;i<field_len;i++)
+        tmp_field_size += unique_field_offset_size[i*2+1];
+
+    for(i=0;base->page_ids[i]!=0;i++){
+        if(base->page_ids[i]!=table_id)
+            continue;
+        page = calloc(1, page_size);
+        for(j=0;page->m_row_mask[j]!=0;j++){
+            if(page->m_row_mask[j]==0)
+                continue;
+            tmp_data2 = calloc(tmp_field_size, sizeof(char));
+            m_row_field(fp, 1, base, i, j, unique_field_offset_size, field_len, tmp_data2);
+
+            tmp_data = data;
+            for(k=0;k<row_length;k++, tmp_data=tmp_field_size*i+data){
+                tmp_data3 = tmp_data2;
+                for(h=0;h<field_len;h++){
+                    tmp_data+=unique_field_offset_size[h*2];
+                    for(h1=0;h1<unique_field_offset_size[h*2+1];h1++){
+                        if(*(tmp_data+h1)==*(tmp_data3+h1))
+                            continue;
+                        h1=-h1;
+                        break;
+                    }
+                    if(h1>0){
+                        free(tmp_data2);
+                        free(page);
+                        return 1;
+                    }
+                    tmp_data3 += (int)(unique_field_offset_size[h*2+1]);
+                }
+            }
+            free(tmp_data2);
+        }
+        free(page);
+    }
+
+    return 0;
+}
+
+
 
 int make_row(void* values, struct D_field* fields){
 
@@ -746,7 +663,7 @@ int make_row(void* values, struct D_field* fields){
 
 //int insert_row(struct D_context * ctx, int table_id, int field_len, char** field_names, void* value);
 
-int insert_rows(struct D_context * ctx, int table_id, int field_len, char** field_names, int value_len, void** values){
+int m_insert_rows(struct D_context * ctx, int table_id, int field_len, char** field_names, int value_len, void** values){
     int i, j, k, i1, i2, rest_value_len=value_len, rlt;
     int offset_page_begin;
     struct D_page *tmp_page;
@@ -894,12 +811,12 @@ int delete_rows(struct D_context * ctx, int * table_ids, struct R_query * query)
     return 0;
 }
 
-int update_rows(struct D_context * ctx, int field_opera_len, struct R_field_opera* field_opera, struct R_query * query){
+int m_update_rows(struct D_context * ctx, int field_opera_len, struct R_field_opera* field_opera, struct R_query * query){
 
     return 0;
 }
 
-int do_select(struct D_context * ctx, struct R_query* query, struct R_view* view){
+int m_do_select(struct D_context * ctx, struct R_query* query, struct R_view* view){
 
     return 0;
 }

@@ -40,37 +40,37 @@ int test_table(){
     strcpy(fields[1].name, "name2");
     strcpy(fields[2].name, "name3");
 
-    if((rlt=create_table(ctx, "stu", fields, 2))!=0){
+    if((rlt= m_create_table(ctx, "stu", fields, 2)) != 0){
         printf("error%d", rlt);
         return 1;
     }
     print_database(ctx);
 
-//    if((rlt=delete_table(ctx, "stu"))!=0){
+//    if((rlt=m_delete_table(ctx, "stu"))!=0){
 //        printf("error%d", rlt);
 //        return 1;
 //    }
 //    print_database(ctx);
 
-//    if((rlt=rename_table(ctx, "stu", "stu_new"))!=0){
+//    if((rlt=m_rename_table(ctx, "stu", "stu_new"))!=0){
 //        printf("error%d", rlt);
 //        return 1;
 //    }
 //    print_database(ctx);
 
-    if((rlt=add_field(ctx, ctx->tables[0].table_id, &fields[2]))!=0){
+    if((rlt= m_add_field(ctx, ctx->tables[0].table_id, &fields[2])) != 0){
         printf("error%d", rlt);
         return 1;
     }
     print_database(ctx);
 
-    if((rlt=delete_field(ctx, ctx->tables[0].table_id, fields[2].name))!=0){
+    if((rlt= m_delete_field(ctx, ctx->tables[0].table_id, fields[2].name)) != 0){
         printf("error%d", rlt);
         return 1;
     }
     print_database(ctx);
 
-    if((rlt=rename_field(ctx, ctx->tables[0].table_id, "name1", "name11"))!=0){
+    if((rlt= m_rename_field(ctx, ctx->tables[0].table_id, "name1", "name11")) != 0){
         printf("error%d", rlt);
         return 1;
     }

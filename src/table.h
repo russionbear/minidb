@@ -185,22 +185,24 @@ struct R_view{
 
 int create_database(char *name);
 int delete_database(char *name);
-int load_database(char* name, struct D_context * ctx);
+int load_database(char* name, struct D_base* base);
 
-int create_table(struct D_context * ctx, char* table_name, struct D_field* fields, int field_len);
-int delete_table(struct D_context * ctx, char* table_name);
-int rename_table(struct D_context * ctx, char* old_name, char* new_name);
-
-
-int add_field(struct D_context * ctx, int table_id, struct D_field* field);
-int delete_field(struct D_context * ctx, int table_id, char * field_name);
-int rename_field(struct D_context * ctx, int table_id, char* old_name, char* new_name);
+int m_create_table(FILE *fp, struct D_base* base, char* table_name, struct D_field* fields, int field_len);
+int m_delete_table(FILE *fp, struct D_base* base, char* table_name);
+int m_rename_table(FILE *fp, struct D_base* base, char* old_name, char* new_name);
 
 
-int insert_rows(struct D_context * ctx, int table_id, int field_len, char** field_names, int value_len, void** values);
+int m_add_field(FILE *fp, struct D_base* base, struct D_field* field);
+int m_delete_field(FILE *fp, struct D_base* base, int field_id);
+int m_rename_field(FILE *fp, struct D_base* base, int field_id, char* new_name);
+
+
+int m_check_rows_unique_field(FILE *fp, struct D_base* base, int table_id, int* unique_field_offset_size, int field_len, int row_length, char* data);
+
+int m_insert_rows(struct D_context * ctx, int table_id, int field_len, char** field_names, int value_len, void** values);
 int delete_rows(struct D_context * ctx, int * table_ids, struct R_query * query);
-int update_rows(struct D_context * ctx, int field_opera_len, struct R_field_opera* field_opera, struct R_query * query);
-int do_select(struct D_context * ctx, struct R_query* query, struct R_view* view);
+int m_update_rows(struct D_context * ctx, int field_opera_len, struct R_field_opera* field_opera, struct R_query * query);
+int m_do_select(struct D_context * ctx, struct R_query* query, struct R_view* view);
 
 
 #endif
