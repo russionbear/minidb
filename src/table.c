@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-
+#include "utils.h"
 #define OPEN_LOG
 
 #ifdef OPEN_LOG
@@ -324,6 +324,28 @@ int count_row_size(struct D_field* fields, int field_len, int table_id){
     return k;
 }
 
+int count_field_offset_size(struct D_base* base, int table_id, struct D_field* fields, int length, int * rlt){
+    int i, j, k, h1, offset;
+    for(i=0, j=0, k=0, h1=0, offset=0;j<base->field_nu;i++){
+        if(base->fields[i].field_id==0)
+            continue;
+        if(base->fields[i].table_id==table_id){
+            if(fields[h1].field_id==i+1){
+                rlt[h1*3] = i + 1;
+                rlt[h1*3+1] = offset;
+                rlt[h1*3+2] = fields[h1].filed_size;
+                h1++;
+                if(h1>=length)
+                    break;
+            }
+            offset += base->fields[i].filed_size;
+            k++;
+        }
+        j++;
+    }
+}
+
+
 int get_rest_table_index(struct D_base* base, int start_index){
     int i;
     for(i=start_index;;i++)
@@ -345,7 +367,7 @@ int create_database(char *name){
 
     if((fp=fopen(name, "wb"))==0)
         return 1;
-    
+
     struct D_base db;
     memset(&db, 0, sizeof(db));
     strncpy(db.name, name, sizeof(db.name));
@@ -601,8 +623,51 @@ int m_rename_field(FILE *fp, struct D_base* base, int field_id, char* new_name){
     return m_field(fp, 0, base, field_id-1);
 }
 
+
+int m_iter_table_rows(FILE *fp, struct D_base* base, int table_id, int *unique_field_offset_size, int field_len, iter_arg_func arg_func, void* arg_func_arg){
+    int row_size, row_begin_offset, page_size, tmp_field_size;
+    int i, j, k, h, h1;
+    int rlt;
+    char* tmp_data2;
+    struct D_page *page;
+    if(fp==0||base==0){
+        return 1;
+    }
+
+    row_size = base->tables[table_id-1].row_size;
+    page_size = (int32_t)(sizeof(struct D_page) + PAGE_SIZE/row_size * sizeof(u_int8_t));
+    tmp_field_size = 0;
+    for(i=0;i<field_len;i++)
+        tmp_field_size += unique_field_offset_size[i*2+1];
+
+    for(i=0;base->page_ids[i]!=0;i++){
+        if(base->page_ids[i]!=table_id)
+            continue;
+        page = calloc(1, page_size);
+        for(j=0;page->m_row_mask[j]!=0;j++){
+            if(page->m_row_mask[j]==0)
+                continue;
+            tmp_data2 = calloc(tmp_field_size, sizeof(char));
+            m_row_field(fp, 1, base, i, j, unique_field_offset_size, field_len, tmp_data2);
+
+            rlt = arg_func(base, ((u_int64_t)j<<32)+j, tmp_data2, arg_func_arg);
+            switch (rlt) {
+                case 1: free(tmp_data2);free(page);return 0;
+                case 2: free(tmp_data2);free(page);return 2;
+                default:
+                    break;
+            }
+
+            free(tmp_data2);
+        }
+        free(page);
+    }
+
+    return 0;
+}
+
 // row
-int m_check_rows_unique_field(FILE *fp, struct D_base* base, int table_id, int *unique_field_offset_size, int field_len, int row_length, char* data){
+u_int64_t m_check_rows_unique_field(FILE *fp, struct D_base* base, int table_id, int *unique_field_offset_size, int field_len, int row_length, char* data){
     int row_size, row_begin_offset, page_size, tmp_field_size;
     int i, j, k, h, h1;
     char* tmp_data = data;
@@ -631,6 +696,15 @@ int m_check_rows_unique_field(FILE *fp, struct D_base* base, int table_id, int *
             tmp_data = data;
             for(k=0;k<row_length;k++, tmp_data=tmp_field_size*i+data){
                 tmp_data3 = tmp_data2;
+
+                for(h=0;h<tmp_field_size;h++){
+                    if(tmp_data[h]==tmp_data2[h])
+                        continue;
+                    h = -h;
+                    break;
+                }
+                if(h>0)
+
                 for(h=0;h<field_len;h++){
                     tmp_data+=unique_field_offset_size[h*2];
                     for(h1=0;h1<unique_field_offset_size[h*2+1];h1++){
@@ -642,7 +716,7 @@ int m_check_rows_unique_field(FILE *fp, struct D_base* base, int table_id, int *
                     if(h1>0){
                         free(tmp_data2);
                         free(page);
-                        return 1;
+                        return ((u_int64_t)j<<32)+k;
                     }
                     tmp_data3 += (int)(unique_field_offset_size[h*2+1]);
                 }
@@ -663,13 +737,13 @@ int make_row(void* values, struct D_field* fields){
 
 //int insert_row(struct D_context * ctx, int table_id, int field_len, char** field_names, void* value);
 
-int m_insert_rows(struct D_context * ctx, int table_id, int field_len, char** field_names, int value_len, void** values){
+int m_insert_rows(FILE *fp, struct D_base* base, int table_id, int field_len, char** field_names, int value_len, void** values){
     int i, j, k, i1, i2, rest_value_len=value_len, rlt;
     int offset_page_begin;
     struct D_page *tmp_page;
     struct D_field tmp_field;
     unsigned long row_size, page_size, total_field_len;
-    FILE *fp;
+
     int *filed_mask_arr = 0; // 17: 1未提供 1-16 字段所在下标
 
     if(field_names==0||values==0||ctx==0)
@@ -806,20 +880,228 @@ int m_insert_rows(struct D_context * ctx, int table_id, int field_len, char** fi
     return 0;
 }
 
-int delete_rows(struct D_context * ctx, int * table_ids, struct R_query * query){
+int m_delete_rows(struct D_context * ctx, int * table_ids, struct R_query * query){
 
     return 0;
 }
 
-int m_update_rows(struct D_context * ctx, int field_opera_len, struct R_field_opera* field_opera, struct R_query * query){
+int m_update_rows(struct D_context * ctx, int field_opera_len, struct R_arith_nodes* field_opera, struct R_query * query){
 
     return 0;
 }
 
-int m_do_select(struct D_context * ctx, struct R_query* query, struct R_view* view){
 
+
+int m_do_select(
+        FILE *fp, struct D_base* base, struct R_query * condition,
+        struct R_arith_nodes *field_opera, int field_len, char** data){
+
+}
+
+int is_memory_equal(u_int8_t *d1, u_int8_t * d2, int length){
+    int i=0;
+    for(i=0;i<length;i++){
+        if(d1[i]==d2[i])
+            continue;
+        return 0;
+    }
+    return 1;
+}
+
+int m_string_in(u_int8_t* s1, int len1, u_int8_t* s2, int len2){
+    int i=0, j=0;
+    for(i=0;i<len1;i++){
+        for(j=0;j<len2; j++)
+            if(s1[i+j]!=s2[j])
+                break;
+        if(j==len2)
+            return i;
+    }
+    return -1;
+}
+
+
+/**
+ *
+ *
+ *             switch (type) {
+                case L_NOT: return int8tob(rlt, (int8_t)(!b2int8(d1)));
+                case L_EQ: return b2int8(d1) == b2int8(d2);
+                case L_GE: return b2int8(d1) >= b2int8(d2);
+            }
+ */
+
+/**
+ *
+ * @param d1_field
+ * @param type
+ * @param d1
+ * @param d2
+ * @param rlt
+ * @return
+ */
+inline u_int64_t b_arith_opera(struct D_field* d1_field, struct D_field* d2_field,  enum R_ARI_TYPE type, u_int8_t *d1, u_int8_t *d2, u_int8_t* rlt){
+    switch (d1_field->type) {
+        case BOOL:
+            switch (type) {
+                case L_NOT: return int8tob(rlt, (int8_t)(!b2int8(d1)));
+                case AND: return int8tob(rlt, (int8_t)(b2int8(d1) && b2int8(d2)));
+                case OR: return int8tob(rlt, (int8_t)(b2int8(d1) || b2int8(d2)));
+            }
+        case CHAR:
+            switch (type) {
+                case ADD: return int8tob(rlt, (int8_t)(b2int8(d1) + b2int8(d2)));
+                case SUB: return int8tob(rlt, (int8_t)(b2int8(d1) - b2int8(d2)));
+                case MULTIPLY: return int8tob(rlt, (int8_t)(b2int8(d1) * b2int8(d2)));
+                case DIVIDE: return int8tob(rlt, (int8_t)(b2int8(d1) / b2int8(d2)));
+
+                case L_EQ: return int8tob(rlt, (int8_t)(b2int8(d1) == b2int8(d2)));
+                case L_GE: return int8tob(rlt, (int8_t)(b2int8(d1) >= b2int8(d2)));
+                case L_LE: return int8tob(rlt, (int8_t)(b2int8(d1) <= b2int8(d2)));
+                case L_NE: return int8tob(rlt, (int8_t)(b2int8(d1) != b2int8(d2)));
+                case L_GT: return int8tob(rlt, (int8_t)(b2int8(d1) >  b2int8(d2)));
+                case L_LT: return int8tob(rlt, (int8_t)(b2int8(d1) <  b2int8(d2)));
+
+            }
+            break;
+        case INT:
+            switch (type) {
+                case ADD: return int32tob(rlt, b2int32(d1) + b2int32(d2));
+                case SUB: return int32tob(rlt, b2int32(d1) - b2int32(d2));
+                case MULTIPLY: return int32tob(rlt, b2int32(d1) * b2int32(d2));
+                case DIVIDE: return int32tob(rlt, b2int32(d1) / b2int32(d2));
+
+                case L_EQ: return int8tob(rlt, (int8_t)(b2int32(d1) == b2int32(d2)));
+                case L_GE: return int8tob(rlt, (int8_t)(b2int32(d1) >= b2int32(d2)));
+                case L_LE: return int8tob(rlt, (int8_t)(b2int32(d1) <= b2int32(d2)));
+                case L_NE: return int8tob(rlt, (int8_t)(b2int32(d1) != b2int32(d2)));
+                case L_GT: return int8tob(rlt, (int8_t)(b2int32(d1) >  b2int32(d2)));
+                case L_LT: return int8tob(rlt, (int8_t)(b2int32(d1) <  b2int32(d2)));
+            }
+            break;
+        case LONG:
+            switch (type) {
+                case ADD: return int64tob(rlt, b2int64(d1) + b2int64(d2));
+                case SUB: return int64tob(rlt, b2int64(d1) - b2int64(d2));
+                case MULTIPLY: return int64tob(rlt, b2int64(d1) * b2int64(d2));
+                case DIVIDE: return int64tob(rlt, b2int64(d1) / b2int64(d2));
+
+                case L_EQ: return int8tob(rlt, (int8_t)(b2int64(d1) == b2int64(d2)));
+                case L_GE: return int8tob(rlt, (int8_t)(b2int64(d1) >= b2int64(d2)));
+                case L_LE: return int8tob(rlt, (int8_t)(b2int64(d1) <= b2int64(d2)));
+                case L_NE: return int8tob(rlt, (int8_t)(b2int64(d1) != b2int64(d2)));
+                case L_GT: return int8tob(rlt, (int8_t)(b2int64(d1) >  b2int64(d2)));
+                case L_LT: return int8tob(rlt, (int8_t)(b2int64(d1) <  b2int64(d2)));
+            }
+            break;
+        case FLOAT:
+            switch (type) {
+                case ADD: return float32tob(rlt, b2float32(d1) + b2float32(d2));
+                case SUB: return float32tob(rlt, b2float32(d1) - b2float32(d2));
+                case MULTIPLY: return float32tob(rlt, b2float32(d1) * b2float32(d2));
+                case DIVIDE: return float32tob(rlt, b2float32(d1) / b2float32(d2));
+
+                case L_EQ: return int8tob(rlt, (int8_t)(b2float32(d1) == b2float32(d2)));
+                case L_GE: return int8tob(rlt, (int8_t)(b2float32(d1) >= b2float32(d2)));
+                case L_LE: return int8tob(rlt, (int8_t)(b2float32(d1) <= b2float32(d2)));
+                case L_NE: return int8tob(rlt, (int8_t)(b2float32(d1) != b2float32(d2)));
+                case L_GT: return int8tob(rlt, (int8_t)(b2float32(d1) >  b2float32(d2)));
+                case L_LT: return int8tob(rlt, (int8_t)(b2float32(d1) <  b2float32(d2)));
+            }
+            break;
+        case DOUBLE:
+            switch (type) {
+                case ADD: return float64tob(rlt, b2float64(d1) + b2float64(d2));
+                case SUB: return float64tob(rlt, b2float64(d1) - b2float64(d2));
+                case MULTIPLY: return float64tob(rlt, b2float64(d1) * b2float64(d2));
+                case DIVIDE: return float64tob(rlt, b2float64(d1) / b2float64(d2));
+
+                case L_EQ: return int8tob(rlt, (int8_t)(b2float64(d1) == b2float64(d2)));
+                case L_GE: return int8tob(rlt, (int8_t)(b2float64(d1) >= b2float64(d2)));
+                case L_LE: return int8tob(rlt, (int8_t)(b2float64(d1) <= b2float64(d2)));
+                case L_NE: return int8tob(rlt, (int8_t)(b2float64(d1) != b2float64(d2)));
+                case L_GT: return int8tob(rlt, (int8_t)(b2float64(d1) >  b2float64(d2)));
+                case L_LT: return int8tob(rlt, (int8_t)(b2float64(d1) <  b2float64(d2)));
+            }
+            break;
+
+        case STRING:
+            switch (type) {
+                case L_EQ: return int8tob(rlt, (int8_t) is_memory_equal(d1, d2, d1_field->length));
+                case L_GE: return int8tob(rlt, (int8_t) !is_memory_equal(d1, d2, d1_field->length));
+
+                case L_IN: return int8tob(rlt, (int8_t) (-1!=m_string_in(d1, d1_field->length, d2, d2_field->length)));
+                case L_CONTAINS: return int8tob(rlt, (int8_t) (-1!=m_string_in(d2, d2_field->length, d1, d1_field->length)));
+            }
+
+        default:
+            return 0;
+    }
     return 0;
 }
+
+
+
+int m_i_select_rows(struct D_base* base, u_int64_t row_id, int *field_offset_size, int field_len, u_int8_t* row_data, void* argv){
+
+    int h=0, h1, tmp_data_offset, row_data_offset;
+    struct Q_select_rows* select_where = (struct Q_select_rows*)argv;
+    struct R_arith_node* tmp_arith_node=0;
+
+    /// refresh cache data
+    // refresh field _data
+    for(h=0, h1=select_where->condition.field_value_offset_len[0], tmp_data_offset=0, row_data_offset=0;h<field_len;h++){
+        if(field_offset_size[h*3]==select_where->condition.nodes[h1].field_id){
+            memcpy(select_where->condition.nodes[h1].value+tmp_data_offset, row_data+row_data_offset, field_offset_size[h*3+1]);
+            h1++;
+            tmp_data_offset += field_offset_size[h*3+2];
+        }
+        row_data_offset += field_offset_size[h*3+2];
+    }
+    // refresh middle data
+    for(h=select_where->condition.mid_value_offset_len[0];h<select_where->condition.mid_value_offset_len[1];h++){
+        tmp_arith_node = &select_where->condition.nodes[h];
+        b_arith_opera(
+                &select_where->condition.nodes[tmp_arith_node->param_node_ids[0]].custom_field,
+                &select_where->condition.nodes[tmp_arith_node->param_node_ids[1]].custom_field,
+                tmp_arith_node->type,
+                select_where->condition.nodes[tmp_arith_node->param_node_ids[0]].value,
+                select_where->condition.nodes[tmp_arith_node->param_node_ids[1]].value,
+                tmp_arith_node->value
+                );
+    }
+    // refresh logical data
+    if(tmp_arith_node==0)
+        return 2;
+    if(tmp_arith_node->value[0]){
+        // 提取需要的字段
+        row_data_offset = 0;
+        tmp_data_offset = 0;
+        select_where->result_data[select_where->result_offset] = calloc(1, select_where->need_field_row_size);
+        for(h=0;h<field_len;h++){
+            row_data_offset += field_offset_size[h*3+1];
+            if(field_offset_size[h*3]!=select_where->need_field_offset_size[h1*3])
+                continue;
+            memcpy(
+                    select_where->result_data[select_where->result_offset]+tmp_data_offset,
+                    row_data+row_data_offset,
+                    field_offset_size[h*3+2]);
+            tmp_data_offset += field_offset_size[h*3+2];
+            h1++;
+            if(h1==select_where->need_field_len)
+                break;
+        }
+        select_where->result_offset ++;
+        if(select_where->result_offset==select_where->result_length)
+            return 1;
+    }
+    return 0;
+}
+
+int m_i_join_select(struct D_base* base, u_int64_t row_id, int *field_offset_size, int field_len, u_int8_t* row_data, void* argv){
+
+}
+
 
 
 // ------------------------------------

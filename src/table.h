@@ -10,9 +10,9 @@
 #define MAX_TABLE_NU 256  // 默认不能超过2**12 - 16
 #define PAGE_SIZE 1048576//2**20
 #define MAX_PAGE_NU 1048576//2**20
-#define MAX_SELECT_LIMIT 1048576//2**20
+#define MAX_SELECT_LIMIT 1024//2**10
 
-// 变长+最大长度限制, don't support null
+// 变长+最大长度限制, don't support null, 单主键
 
 //?> about columnus
 
@@ -23,14 +23,14 @@ int get_random(int min, int max, int *not_in_arr, int not_in_arr_len);
 
 
 enum D_COL_TYPE{
-    BOOL = 0,
-    INT = 1,
-    LONG = 2,
-    FLOAT = 3,
-    DOUBLE = 4,
-    CHAR,
-    STRING, // max 255
-    BLOB
+    BOOL = 0, //int8
+    INT = 1,  // int32
+    LONG = 2,   // int 64
+    FLOAT = 3,  //float 32
+    DOUBLE = 4, // float 32
+    CHAR,      // int8
+    STRING, // max 255, int8*
+    BLOB    // int64
 };
 
 
@@ -109,6 +109,9 @@ int as_check_unique(){
 
 }
 
+// 0 continue, 1 break, 2 exit
+typedef int(*iter_arg_func)(struct D_base* base, u_int64_t row_id, int *field_offset_size, int field_len, char*row_data, void* argv);
+
 
 /// 高级操作
 
@@ -122,12 +125,8 @@ struct D_context{
 
 // about query
 
-// == >= <= != > < like in contains
-enum R_LOGICAL_TYPE{
-    AND = 1,
-    OR = 2
-};
 
+// == >= <= != > < like in contains
 // value + - * / %
 enum R_ARI_TYPE{
     VALUE,
@@ -136,7 +135,11 @@ enum R_ARI_TYPE{
     MULTIPLY,
     DIVIDE,
 
-    L_EQ = 0x10,
+    AND,
+    OR,
+
+    L_NOT = 0x10,
+    L_EQ,
     L_GE,
     L_LE,
     L_NE,
@@ -149,32 +152,44 @@ enum R_ARI_TYPE{
 
 
 struct R_value{
-    int table_id;
-    void* value;
-    char* field_name;
+    int field_id;
+    u_int8_t* value;
 };
 
-struct R_arith{
+struct R_arith_node{
     enum R_ARI_TYPE type;
-    struct R_value* params[2];
+    int param_node_ids[2];
+
+    int field_id;
+    struct D_field custom_field;
+    u_int8_t* value;
 };
 
-struct R_logical{
-    enum R_LOGICAL_TYPE * logical;
-    struct R_arith* arith_arr;
+/**
+ * 当被用于logical时， 最后一个节点(mid_value_range)的数据表示最终取值
+ */
+struct R_arith_nodes{
+    int node_arr_length;
+    struct R_arith_node* nodes;
+    int field_value_offset_len[2];
+    int mid_value_offset_len[2];
 };
+
+
+//struct R_logical{
+//    int node_arr_length;
+//    struct R_arith_node* arith_arr;
+//    enum R_LOGICAL_TYPE * logical;
+//    int field_value_offset_len[2];
+//    int mid_value_offset_len[2];
+//};
 
 
 struct R_query{
     int* table_ids;
-    struct R_logical condition;
+    struct R_arith_nodes condition;
 };
 
-struct R_field_opera{
-    int table_id;
-    char* field_name;
-    struct R_arith opera;
-};
 
 
 struct R_view{
@@ -196,13 +211,38 @@ int m_add_field(FILE *fp, struct D_base* base, struct D_field* field);
 int m_delete_field(FILE *fp, struct D_base* base, int field_id);
 int m_rename_field(FILE *fp, struct D_base* base, int field_id, char* new_name);
 
+int m_do_select(FILE *fp, struct D_base* base, struct R_query * condition, struct R_arith_nodes *field_opera, int field_len, char** data);
+u_int64_t m_check_rows_unique_field(FILE *fp, struct D_base* base, int table_id, int* unique_field_offset_size, int field_len, int row_length, char* data);
 
-int m_check_rows_unique_field(FILE *fp, struct D_base* base, int table_id, int* unique_field_offset_size, int field_len, int row_length, char* data);
+int m_insert_rows(FILE *fp, struct D_base* base, int table_id, int field_len, char** field_names, int value_len, void** values);
+int m_delete_rows(struct D_context * ctx, int * table_ids, struct R_query * query);
+int m_update_rows(struct D_context * ctx, int field_opera_len, struct R_arith_nodes* field_opera, struct R_query * query);
 
-int m_insert_rows(struct D_context * ctx, int table_id, int field_len, char** field_names, int value_len, void** values);
-int delete_rows(struct D_context * ctx, int * table_ids, struct R_query * query);
-int m_update_rows(struct D_context * ctx, int field_opera_len, struct R_field_opera* field_opera, struct R_query * query);
-int m_do_select(struct D_context * ctx, struct R_query* query, struct R_view* view);
 
+struct Q_select_rows{
+    struct R_arith_nodes condition;
+
+    int *need_field_offset_size;
+    int need_field_len;
+    int need_field_row_size;
+
+    int result_length;
+    int result_offset;
+    u_int8_t * result_data[0];
+
+};
+
+struct Q_join_select{
+    int field_len;
+    int tmp_field_size;
+    struct R_arith_nodes condition;
+    u_int8_t * data;
+    int unique_field_offset_size[0];
+};
+
+
+int m_i_select_rows(struct D_base* base, u_int64_t row_id, int *field_offset_size, int field_len, u_int8_t *row_data, void* argv);
+
+int m_i_join_select(struct D_base* base, u_int64_t row_id, int *field_offset_size, int field_len, u_int8_t* row_data, void* argv);
 
 #endif
