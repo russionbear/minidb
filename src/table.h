@@ -13,7 +13,8 @@
 #define MAX_SELECT_LIMIT 1024//2**10
 
 // 变长+最大长度限制, don't support null, 单主键
-
+// 为提供速度，减少系统调用，一次读一行或多行
+// 页内索引
 //?> about columnus
 
 
@@ -37,6 +38,7 @@ enum D_COL_TYPE{
 struct D_field{
     int table_id;
     int field_id; // = index + 1
+    int index_field_id;
     char name[MAX_NAME_LENGTH]; // default 256
     enum D_COL_TYPE type;
     int length;
@@ -71,6 +73,7 @@ struct D_base{
 
 struct D_page{
     int table_id;
+    int row_nu;
     // 0: not used
     u_int8_t m_row_mask[0];
 };
@@ -94,14 +97,15 @@ int m_field(FILE *fp, u_int8_t is_read, struct D_base* base, int field_index);
 // D_page
 
 int m_page(FILE *fp, u_int8_t is_read, struct D_base* base, int page_index, struct D_page *page_header);
+int m_page_info(FILE *fp, u_int8_t is_read, struct D_base* base, int page_index, struct D_page *page_header);
 int m_page_row_mask(FILE *fp, u_int8_t is_read, struct D_base* base, int page_index, int row_index, struct D_page *page_header);
 
 // D_row
 
-int m_row(FILE *fp, u_int8_t is_read, struct D_base* base, int page_index, int row_index, char* data);
-int m_row_field(FILE *fp, u_int8_t is_read, struct D_base* base, int page_index, int row_index, int *field_offset_size, int field_len, char* data);
-int m_rows(FILE *fp, u_int8_t is_read, struct D_base* base, int page_index, int row_offset, int row_length, char* data);
-int m_rows_fields(FILE *fp, u_int8_t is_read, struct D_base* base, int page_index, int row_offset, int row_length, int *field_offset_size, int field_len, char* data);
+int m_row(FILE *fp, u_int8_t is_read, struct D_base* base, int page_index, int row_index, u_int8_t * data);
+int m_row_field(FILE *fp, u_int8_t is_read, struct D_base* base, int page_index, int row_index, int *field_offset_size, int field_len, u_int8_t * data);
+int m_rows(FILE *fp, u_int8_t is_read, struct D_base* base, int page_index, int row_offset, int row_length, u_int8_t * data);
+int m_rows_fields(FILE *fp, u_int8_t is_read, struct D_base* base, int page_index, int row_offset, int row_length, int *field_offset_size, int field_len, u_int8_t * data);
 
 
 /// 辅助操作
@@ -110,7 +114,7 @@ int as_check_unique(){
 }
 
 // 0 continue, 1 break, 2 exit
-typedef int(*iter_arg_func)(struct D_base* base, u_int64_t row_id, int *field_offset_size, int field_len, char*row_data, void* argv);
+typedef int(*iter_arg_func)(struct D_base* base, int page_index, struct D_page* page_header, u_int8_t *row_data, void* argv);
 
 
 /// 高级操作
@@ -173,6 +177,7 @@ struct R_arith_nodes{
     struct R_arith_node* nodes;
     int field_value_offset_len[2];
     int mid_value_offset_len[2];
+    int *update_value_index; // 来自mid_value_offset_len 和 固定值
 };
 
 
@@ -214,17 +219,30 @@ int m_rename_field(FILE *fp, struct D_base* base, int field_id, char* new_name);
 int m_do_select(FILE *fp, struct D_base* base, struct R_query * condition, struct R_arith_nodes *field_opera, int field_len, char** data);
 u_int64_t m_check_rows_unique_field(FILE *fp, struct D_base* base, int table_id, int* unique_field_offset_size, int field_len, int row_length, char* data);
 
-int m_insert_rows(FILE *fp, struct D_base* base, int table_id, int field_len, char** field_names, int value_len, void** values);
-int m_delete_rows(struct D_context * ctx, int * table_ids, struct R_query * query);
-int m_update_rows(struct D_context * ctx, int field_opera_len, struct R_arith_nodes* field_opera, struct R_query * query);
+int m_insert_rows(FILE *fp, struct D_base* base, int table_id, struct D_field* fields, int field_len, int value_len, u_int8_t * values);
+int m_delete_rows(FILE *fp, struct D_base* base, struct R_query * query);
 
+int m_update_rows(FILE *fp, struct D_base* base, struct R_query * query);
+
+enum Q_OPERA_TYPE{
+    SELECT,
+    DELETE,
+    UPDATE,
+};
 
 struct Q_select_rows{
     struct R_arith_nodes condition;
 
-    int *need_field_offset_size;
+    int prim_field_len;
+    int *prim_field_offset_size;
+    int prim_field_row_size;
+
     int need_field_len;
+    int *need_field_offset_size;
     int need_field_row_size;
+
+    enum Q_OPERA_TYPE opera_type;
+    FILE *write_fp;
 
     int result_length;
     int result_offset;
@@ -232,17 +250,54 @@ struct Q_select_rows{
 
 };
 
-struct Q_join_select{
-    int field_len;
-    int tmp_field_size;
-    struct R_arith_nodes condition;
-    u_int8_t * data;
-    int unique_field_offset_size[0];
+struct Q_insert_rows{
+    FILE *write_fp;
+    int row_size;
+    int max_page_rows;
+
+    int current_offset;
+    int insert_data_length;
+    u_int8_t * insert_data[0];
+
 };
 
 
-int m_i_select_rows(struct D_base* base, u_int64_t row_id, int *field_offset_size, int field_len, u_int8_t *row_data, void* argv);
+int m_i_select_rows(struct D_base* base, int page_index, struct D_page* page_header, u_int8_t *row_data, void* argv);
+int m_i_insert_rows(struct D_base* base, int page_index, struct D_page* page_header, u_int8_t* row_data, void* argv);
+int m_i_delete_rows(struct D_base* base, int page_index, struct D_page* page_header, u_int8_t* row_data, void* argv);
+int m_i_update_rows(struct D_base* base, int page_index, struct D_page* page_header, u_int8_t* row_data, void* argv);
 
-int m_i_join_select(struct D_base* base, u_int64_t row_id, int *field_offset_size, int field_len, u_int8_t* row_data, void* argv);
+// join select
 
+//struct Q_join_select{
+//
+//    struct R_arith_nodes condition;
+//
+//    int joined_table_nu;
+//    int *table_ids;
+//    int *table_row_offset;
+//    struct Q_select_rows * table_fields; // 只用中间三个字段
+//    FILE **fps;
+//
+//    struct Q_select_rows result_row_field;
+//};
+//
+//
+//struct Q_yield_func_args{
+//    int y_page_max_rows;
+//    int y_page_header_size;
+//    int y_query_row_size;
+//
+//    u_int8_t *y_row_data;
+//
+//    int y_page_b_offset;
+//    int y_row_b_offset;
+//    struct D_page *y_page;
+//};
+//
+//int m_join_select(struct D_base* base, struct Q_join_select* join_select);
+//
+//int m_join2table_select(struct D_base* base, struct Q_join_select* join_select);
+
+// -------------------------------------
 #endif
