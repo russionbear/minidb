@@ -1,5 +1,6 @@
-#define __TABLE__
-#ifdef __TABLE__
+
+#ifndef MINIDB_TABLE_H
+#define MINIDB_TABLE_H
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -109,13 +110,10 @@ int m_rows_fields(FILE *fp, u_int8_t is_read, struct D_base* base, int page_inde
 
 
 /// 辅助操作
-int as_check_unique(){
-
-}
 
 // 0 continue, 1 break, 2 exit
 typedef int(*iter_arg_func)(struct D_base* base, int page_index, struct D_page* page_header, u_int8_t *row_data, void* argv);
-
+//u_int64_t b_arith_opera(struct D_field* d1_field, struct D_field* d2_field,  enum R_ARI_TYPE type, u_int8_t *d1, u_int8_t *d2, u_int8_t* rlt);
 
 /// 高级操作
 
@@ -177,7 +175,8 @@ struct R_arith_nodes{
     struct R_arith_node* nodes;
     int field_value_offset_len[2];
     int mid_value_offset_len[2];
-    int *update_value_index; // 来自mid_value_offset_len 和 固定值
+    int update_field_nu;
+    int *update_field_id_map_node_index; //
 };
 
 
@@ -219,6 +218,7 @@ int m_rename_field(FILE *fp, struct D_base* base, int field_id, char* new_name);
 int m_do_select(FILE *fp, struct D_base* base, struct R_query * condition, struct R_arith_nodes *field_opera, int field_len, char** data);
 u_int64_t m_check_rows_unique_field(FILE *fp, struct D_base* base, int table_id, int* unique_field_offset_size, int field_len, int row_length, char* data);
 
+int m_select_rows(FILE *read_fp, struct D_base* base, int table_id, struct D_field* fields, int field_len, int max_value_len, u_int8_t ** values);
 int m_insert_rows(FILE *fp, struct D_base* base, int table_id, struct D_field* fields, int field_len, int value_len, u_int8_t * values);
 int m_delete_rows(FILE *fp, struct D_base* base, struct R_query * query);
 
@@ -261,11 +261,15 @@ struct Q_insert_rows{
 
 };
 
-
-int m_i_select_rows(struct D_base* base, int page_index, struct D_page* page_header, u_int8_t *row_data, void* argv);
+int m_i_query_rows(struct D_base* base, int page_index, struct D_page* page_header, u_int8_t* row_data, void* argv);
 int m_i_insert_rows(struct D_base* base, int page_index, struct D_page* page_header, u_int8_t* row_data, void* argv);
-int m_i_delete_rows(struct D_base* base, int page_index, struct D_page* page_header, u_int8_t* row_data, void* argv);
-int m_i_update_rows(struct D_base* base, int page_index, struct D_page* page_header, u_int8_t* row_data, void* argv);
+
+//int m_i_select_rows(struct D_base* base, int page_index, struct D_page* page_header, u_int8_t *row_data, void* argv);
+//int m_i_insert_rows(struct D_base* base, int page_index, struct D_page* page_header, u_int8_t* row_data, void* argv);
+//int m_i_delete_rows(struct D_base* base, int page_index, struct D_page* page_header, u_int8_t* row_data, void* argv);
+//int m_i_update_rows(struct D_base* base, int page_index, struct D_page* page_header, u_int8_t* row_data, void* argv);
+
+/**/
 
 // join select
 
@@ -300,4 +304,4 @@ int m_i_update_rows(struct D_base* base, int page_index, struct D_page* page_hea
 //int m_join2table_select(struct D_base* base, struct Q_join_select* join_select);
 
 // -------------------------------------
-#endif
+#endif  // MINIDB_TABLE_H

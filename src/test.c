@@ -6,77 +6,24 @@
 
 #include "utils.h"
 
-void print_database(struct D_context * ctx){
-    int i=0;
-    printf("db_name=%s,table_nu=%d,field_nu=%d\n", ctx->database.name, ctx->database.table_nu, ctx->database.field_nu);
-    for(i=0;i<ctx->database.table_nu;i++)
-        printf("table_name=%s, table_id=%d\n", ctx->tables[i].name, ctx->tables[i].table_id);
-    for(i=0;i<ctx->database.field_nu;i++)
-        printf("field_table=%d field_name=%s, field_type=%d\n", ctx->fields[i].table_id, ctx->fields[i].name, ctx->fields[i].type);
-}
+void print_database(struct D_base* base){
+    int i=0, j=0;
 
-
-int test_table(){
-
-    int rlt = 0;
-    char* name = "hello";
-
-    printf("started\n");
-    create_database(name);
-
-    openlog("minidb", LOG_PID | LOG_PERROR , LOG_USER);
-    struct D_context * ctx = calloc(1, sizeof(struct D_context));
-
-    if((rlt=load_database(name, ctx))!=0){
-
-        printf("db error%d", rlt);
-        return 1;
+    printf("db_name=%s,table_nu=%d,field_nu=%d\n", base->name, base->table_nu, base->field_nu);
+    for(i=0, j=0;j<base->table_nu;i++){
+        if(base->tables[i].table_id==0)
+            continue;
+        printf("table_name=%s, table_id=%d, row_size=%d\n", base->tables[i].name, base->tables[i].table_id, base->tables[i].row_size);
+        j++;
     }
 
-    print_database(ctx);
-
-    struct D_field * fields = calloc(3, sizeof(struct D_field));
-    strcpy(fields[0].name, "name1");
-    strcpy(fields[1].name, "name2");
-    strcpy(fields[2].name, "name3");
-
-    if((rlt= m_create_table(ctx, "stu", fields, 2)) != 0){
-        printf("error%d", rlt);
-        return 1;
+    for(i=0, j=0;j<base->field_nu;i++){
+        if(base->fields[i].field_id==0)
+            continue;
+        printf("field_table=%d field_name=%s, field_type=%d\n", base->fields[i].table_id, base->fields[i].name, base->fields[i].type);
+        j++;
     }
-    print_database(ctx);
 
-//    if((rlt=m_delete_table(ctx, "stu"))!=0){
-//        printf("error%d", rlt);
-//        return 1;
-//    }
-//    print_database(ctx);
-
-//    if((rlt=m_rename_table(ctx, "stu", "stu_new"))!=0){
-//        printf("error%d", rlt);
-//        return 1;
-//    }
-//    print_database(ctx);
-
-    if((rlt= m_add_field(ctx, ctx->tables[0].table_id, &fields[2])) != 0){
-        printf("error%d", rlt);
-        return 1;
-    }
-    print_database(ctx);
-
-    if((rlt= m_delete_field(ctx, ctx->tables[0].table_id, fields[2].name)) != 0){
-        printf("error%d", rlt);
-        return 1;
-    }
-    print_database(ctx);
-
-    if((rlt= m_rename_field(ctx, ctx->tables[0].table_id, "name1", "name11")) != 0){
-        printf("error%d", rlt);
-        return 1;
-    }
-    printf("%s\n", ctx->fields[0].name);
-    print_database(ctx);
-    return 0;
 }
 
 int test_byte_convert(){
@@ -131,6 +78,72 @@ int test_memory_opera(){
 
     return 0;
 }
+
+
+int test_table(){
+
+    int rlt = 0;
+    char* name = "hello";
+    struct D_base base;
+    FILE* fp;
+
+    printf("test database\n");
+    create_database(name);
+
+    openlog("minidb", LOG_PID | LOG_PERROR , LOG_USER);
+
+    if((rlt=load_database(name, &base))!=0){
+
+        printf("db error%d", rlt);
+        return 1;
+    }
+
+    print_database(&base);
+
+    printf("test table and field\n");
+    if((fp=fopen(base.name, "r+b"))==0)
+        return 1;
+    struct D_field * fields = calloc(3, sizeof(struct D_field));
+    strcpy(fields[0].name, "name1");
+    strcpy(fields[1].name, "name2");
+    strcpy(fields[2].name, "name3");
+
+    printf("create_table\n");
+    if((rlt= m_create_table(fp, &base, "stu", fields, 2)) != 0){
+        printf("error%d", rlt);
+        return 1;
+    }
+    print_database(&base);
+
+    printf("rename_table\n");
+    if((rlt= m_rename_table(fp, &base, "stu", "stu_new")) != 0){
+        printf("error%d", rlt);
+        return 1;
+    }
+    print_database(&base);
+
+    printf("add_field\n");
+    if((rlt= m_add_field(fp, &base, fields+2))!=0)
+        return 4;
+    print_database(&base);
+
+    printf("rename_field\n");
+    if((rlt= m_rename_field(fp, &base, 3, "new_name3"))!=0)
+        return 4;
+    print_database(&base);
+
+    printf("del_field\n");
+    if((rlt= m_delete_field(fp, &base, 3))!=0)
+        return 4;
+    print_database(&base);
+
+    printf("del_table\n");
+    if((rlt= m_delete_table(fp, &base, "stu_new"))!=0)
+        return 4;
+    print_database(&base);
+}
+
+
 
 int main(int argc, char const *argv[])
 {
