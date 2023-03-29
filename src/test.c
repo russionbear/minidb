@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "utils.h"
+#include "parse.h"
 
 void print_database(struct D_base* base){
     int i=0, j=0;
@@ -74,16 +75,11 @@ int test_byte_convert(){
 
 }
 
-int test_memory_opera(){
-
-    return 0;
-}
-
 
 int test_table(){
 
     int rlt = 0;
-    char* name = "hello";
+    char name[MAX_NAME_LENGTH] = "hello";
     struct D_base base;
     FILE* fp;
 
@@ -106,7 +102,6 @@ int test_table(){
     struct D_field * fields = calloc(3, sizeof(struct D_field));
     strcpy(fields[0].name, "name1");
     strcpy(fields[1].name, "name2");
-    strcpy(fields[2].name, "name3");
 
     printf("create_table\n");
     if((rlt= m_create_table(fp, &base, "stu", fields, 2)) != 0){
@@ -123,6 +118,8 @@ int test_table(){
     print_database(&base);
 
     printf("add_field\n");
+    strcpy(fields[2].name, "name3");
+    fields[2].table_id = 1;
     if((rlt= m_add_field(fp, &base, fields+2))!=0)
         return 4;
     print_database(&base);
@@ -144,6 +141,42 @@ int test_table(){
 }
 
 
+int test_opera(){
+    int rlt = 0;
+    char name[MAX_NAME_LENGTH] = "hello";
+    struct D_base base;
+    FILE* fp;
+
+    create_database(name);
+
+    if((rlt=load_database(name, &base))!=0){
+
+        printf("db error%d", rlt);
+        return 1;
+    }
+
+    if((fp=fopen(base.name, "r+b"))==0)
+        return 1;
+
+    struct D_field * fields = calloc(3, sizeof(struct D_field));
+    strcpy(fields[0].name, "id");
+    fields[0].type = INT;
+    strcpy(fields[1].name, "name");
+    fields[1].type = STRING;
+    fields[1].length = 16;
+    strcpy(fields[2].name, "grade");
+    fields[2].type = BOOL;
+
+    if((rlt= m_create_table(fp, &base, "stu", fields, 3)) != 0){
+        printf("error%d", rlt);
+        return 1;
+    }
+    print_database(&base);
+
+
+    return 0;
+}
+
 
 int main(int argc, char const *argv[])
 {
@@ -151,6 +184,8 @@ int main(int argc, char const *argv[])
 //    printf("%d,", sizeof(&d1[1]));
 //    printf("%d", sizeof(d1));
 //    return test_table();
-    return test_byte_convert();
+//    return test_byte_convert();
+//    return test_opera();
+    return learn_regex();
 }
 

@@ -59,6 +59,8 @@ struct D_table{
 };
 
 struct D_base{
+    // 顺序排位已固定
+
     char name[MAX_NAME_LENGTH];
 
     int table_nu;
@@ -110,20 +112,6 @@ int m_rows_fields(FILE *fp, u_int8_t is_read, struct D_base* base, int page_inde
 
 
 /// 辅助操作
-
-// 0 continue, 1 break, 2 exit
-typedef int(*iter_arg_func)(struct D_base* base, int page_index, struct D_page* page_header, u_int8_t *row_data, void* argv);
-//u_int64_t b_arith_opera(struct D_field* d1_field, struct D_field* d2_field,  enum R_ARI_TYPE type, u_int8_t *d1, u_int8_t *d2, u_int8_t* rlt);
-
-/// 高级操作
-
-// context
-
-struct D_context{
-    struct D_base database;
-    struct D_table* tables;
-    struct D_field* fields;
-};
 
 // about query
 
@@ -180,15 +168,6 @@ struct R_arith_nodes{
 };
 
 
-//struct R_logical{
-//    int node_arr_length;
-//    struct R_arith_node* arith_arr;
-//    enum R_LOGICAL_TYPE * logical;
-//    int field_value_offset_len[2];
-//    int mid_value_offset_len[2];
-//};
-
-
 struct R_query{
     int* table_ids;
     struct R_arith_nodes condition;
@@ -201,6 +180,25 @@ struct R_view{
     void* data;
 };
 
+
+// 0 continue, 1 break, 2 exit
+typedef int(*iter_arg_func)(struct D_base* base, int page_index, struct D_page* page_header, u_int8_t *row_data, void* argv);
+int get_field_size(struct D_field* field);
+int count_row_size(struct D_field* fields, int field_len, int table_id);
+u_int64_t count_page_max_rows(int row_size);
+u_int64_t count_page_header_size(int row_size);
+int count_field_offset_size(struct D_base* base, int table_id, struct D_field* fields, int length, int * rlt);
+
+int get_rest_table_index(struct D_base* base, int start_index);
+int get_rest_field_index(struct D_base* base, int start_index);
+
+
+int is_memory_equal(const u_int8_t *d1, const u_int8_t * d2, int length);
+int m_string_in(const u_int8_t* s1, int len1, const u_int8_t* s2, int len2);
+u_int64_t b_arith_opera(struct D_field* d1_field, struct D_field* d2_field, enum R_ARI_TYPE type, u_int8_t *d1, u_int8_t *d2, u_int8_t* rlt);
+
+
+/// 高级操作
 
 int create_database(char *name);
 int delete_database(char *name);
@@ -215,19 +213,11 @@ int m_add_field(FILE *fp, struct D_base* base, struct D_field* field);
 int m_delete_field(FILE *fp, struct D_base* base, int field_id);
 int m_rename_field(FILE *fp, struct D_base* base, int field_id, char* new_name);
 
-int m_do_select(FILE *fp, struct D_base* base, struct R_query * condition, struct R_arith_nodes *field_opera, int field_len, char** data);
-u_int64_t m_check_rows_unique_field(FILE *fp, struct D_base* base, int table_id, int* unique_field_offset_size, int field_len, int row_length, char* data);
-
-int m_select_rows(FILE *read_fp, struct D_base* base, int table_id, struct D_field* fields, int field_len, int max_value_len, u_int8_t ** values);
-int m_insert_rows(FILE *fp, struct D_base* base, int table_id, struct D_field* fields, int field_len, int value_len, u_int8_t * values);
-int m_delete_rows(FILE *fp, struct D_base* base, struct R_query * query);
-
-int m_update_rows(FILE *fp, struct D_base* base, struct R_query * query);
 
 enum Q_OPERA_TYPE{
-    SELECT,
-    DELETE,
-    UPDATE,
+    OP_SELECT,
+    OP_DELETE,
+    OP_UPDATE,
 };
 
 struct Q_select_rows{
@@ -261,6 +251,8 @@ struct Q_insert_rows{
 
 };
 
+
+int m_iter_page_rows(FILE *fp, struct D_base* base, int table_id, iter_arg_func arg_func, void* arg_func_arg);
 int m_i_query_rows(struct D_base* base, int page_index, struct D_page* page_header, u_int8_t* row_data, void* argv);
 int m_i_insert_rows(struct D_base* base, int page_index, struct D_page* page_header, u_int8_t* row_data, void* argv);
 
@@ -268,6 +260,13 @@ int m_i_insert_rows(struct D_base* base, int page_index, struct D_page* page_hea
 //int m_i_insert_rows(struct D_base* base, int page_index, struct D_page* page_header, u_int8_t* row_data, void* argv);
 //int m_i_delete_rows(struct D_base* base, int page_index, struct D_page* page_header, u_int8_t* row_data, void* argv);
 //int m_i_update_rows(struct D_base* base, int page_index, struct D_page* page_header, u_int8_t* row_data, void* argv);
+
+int m_select_rows(FILE *read_fp, struct D_base* base, int table_id, struct D_field* fields, int field_len, int max_value_len, u_int8_t ** values);
+int m_insert_rows(FILE *fp, struct D_base* base, int table_id, struct D_field* fields, int field_len, int value_len, u_int8_t * values);
+int m_delete_rows(FILE *fp, struct D_base* base, struct R_query * query);
+
+int m_update_rows(FILE *fp, struct D_base* base, struct R_query * query);
+
 
 /**/
 
