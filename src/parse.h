@@ -102,6 +102,7 @@ struct SQL_STRUCTURE{
 
     struct R_arith_nodes* condition;
 };
+
 int get_str_hash(const char* s1, int str_len);
 
 void free_sql_structure(struct SQL_STRUCTURE * sql_s);

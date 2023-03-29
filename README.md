@@ -33,7 +33,10 @@ struct D_context * ctx; // right
 
 ## io structure
 
-- work dispatcher: 底层任务分配器
+- work dispatcher: 底层任务分配器 + event 
+  - 任务队列、等待读写队列、进行中队列
+  - 过程：无阻塞->出队->if(读){有写->放入等待队列 && return; 读;读完->回调} else (写){有读->}
+  - 过程：无阻塞 -> 出队 -> 获取page锁 -> if(读){有写->放入等待队列 && return; 读;读完->回调} else (写){有读->}
 - work spool: 最底层的io任务
 
 ## sql parse
