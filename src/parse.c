@@ -49,6 +49,8 @@ int count_appeared_nu(const char* input_str, const char* pattern, int* match_off
     return match_count;
 }
 
+//int count_appeared_num_width_range()
+
 /**
  *
  * @param s1
@@ -73,6 +75,49 @@ u_int8_t is_string_equal(const char* s1, const char* s2, int str_len, int flag){
 }
 
 
+int parse_create_table_from_sql(struct SQL_STRUCTURE * sql_s){
+    int bracket_num;
+    int *bracket_offset=0;
+    int i, j;
+    bracket_offset = count_appeared_nu(sql_s->full_sql, "[()]", 0, 1);
+    if(bracket_num<4)
+        return 1;
+    bracket_offset = calloc(bracket_num, sizeof(int));
+    count_appeared_nu(sql_s->full_sql, "[()]", bracket_offset, 1);
+
+    for(i=0;i<bracket_num;i++)
+        for(j=0;j<sql_s->world_length;j++){
+            if(bracket_offset[i]<sql_s->world_offset_size[j*2])
+                continue;
+            else if(bracket_offset[i]<sql_s->world_offset_size[j*2+1]){
+                bracket_offset[i] = -1;
+                break;
+            }
+
+        }
+
+    sql_s->create_table_range[0] = bracket_offset[0];
+    sql_s->create_table_range[1] = bracket_offset[bracket_num-1];
+
+    bracket_offset = count_appeared_nu(sql_s, "[]", 0, 1);
+    bracket_offset = calloc(bracket_num, sizeof(int));
+    bracket_offset = count_appeared_nu(sql_s, ",", bracket_offset, 1);
+    free(bracket_offset);
+}
+
+int parse_select_from_sql(struct SQL_STRUCTURE * sql_s){
+
+}
+
+int parse_insert_from_sql(struct SQL_STRUCTURE * sql_s){
+
+}
+
+int parse_where_from_sql(struct SQL_STRUCTURE * sql_s){
+
+}
+
+
 int pare_sql_from_string(struct SQL_STRUCTURE * sql_s){
     int i, j, k1;
 
@@ -80,6 +125,7 @@ int pare_sql_from_string(struct SQL_STRUCTURE * sql_s){
     int *split_index=0;
     int world_count = 0;
     int* world_offset_size=0;
+    int rlt;
 
     split_count = count_appeared_nu(sql_s->full_sql, "[^\\]'", 0, 1);
     if(split_count%2){
@@ -161,7 +207,9 @@ int pare_sql_from_string(struct SQL_STRUCTURE * sql_s){
 
                     break;
                 case S_KW_TABLE:
-
+                    rlt = parse_create_table_from_sql(sql_s);
+                    if(rlt)
+                        return rlt;
                     break;
                 default:
                     break;
@@ -174,6 +222,9 @@ int pare_sql_from_string(struct SQL_STRUCTURE * sql_s){
         case S_KW_ALTER:
             break;
         case S_KW_SELECT:
+            rlt = parse_select_from_sql(sql_s);
+            if(rlt)
+                return rlt;
             break;
         case S_KW_INSERT:
             break;
@@ -230,20 +281,20 @@ int learn_regex(){
 
     printf("%d\n", get_str_hash("*", 1));
 /** 待匹配字符串 */
-    char inputstr[128] = "'hello,'111\\'welcome '222'to my party";
+    char inputstr[128] = "'hello,'111\\'wel(come) '222'to my party";
 //    printf("%d", inputstr[0]);
 //    scanf("%s", inputstr);
     /** regex 错误输出缓冲区 */
     char regerrbuf[256];
     regex_t reg;
     /** 正则表达式 */
-    const char* pattern = "\\w+"; //  [^\]'
+    const char* pattern = "[()]"; //  [^\]'
     int match_offset_size[200];
     int match_length = 0;
     int i=0;
-    match_length = count_appeared_nu(inputstr, pattern, match_offset_size, 0);
+    match_length = count_appeared_nu(inputstr, pattern, match_offset_size, 1);
 
-    printf("%d\n", match_length);
+    printf("match_length: %d\n", match_length);
     for(;i<match_length;i++)
         printf("%d:%d\n", match_offset_size[i*2], match_offset_size[i*2+1]);
 

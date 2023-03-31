@@ -89,7 +89,7 @@ struct SQL_STRUCTURE{
     // create table 相关
     int create_table_range[2];
     int create_table_field_len;
-    int* create_table_field_split_index; // 逗号的位置
+    int* create_table_field_split_offset; // 逗号的位置
     struct D_field* pared_fields;
 
     // select 相关
