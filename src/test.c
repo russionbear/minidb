@@ -5,7 +5,9 @@
 #include <string.h>
 
 #include "utils.h"
-#include "parse.h"
+#include "reactor.h"
+#include "table.h"
+#include "transaction.h"
 
 void print_database(struct D_base* base){
     int i=0, j=0;
@@ -76,7 +78,7 @@ int test_byte_convert(){
 }
 
 
-int test_table(){
+int test_m_table(){
 
     int rlt = 0;
     char name[MAX_NAME_LENGTH] = "hello";
@@ -141,6 +143,146 @@ int test_table(){
 }
 
 
+int test_tx_table(){
+    int rlt;
+    struct sql_transaction_manager tx_manager;
+    // sql parse
+    char* s1 = "create database ui";
+    printf("%s\n", s1);
+    rlt = run_sql(s1, &tx_manager, 0);
+    if(rlt){
+        printf("%d\n", rlt);
+        return rlt;
+    }
+
+
+    s1 = "use ui";
+    printf("%s\n", s1);
+    rlt = run_sql(s1, &tx_manager, 0);
+    if(rlt){
+        printf("%d\n", rlt);
+        return rlt;
+    }
+    print_database(&tx_manager.base);
+
+    s1 = "create table stu(id int default 8 unique primary key auto_increment, 'name' string(16))";
+    printf("%s\n", s1);
+    rlt = run_sql(s1, &tx_manager, 0);
+    if(rlt){
+        printf("%d\n", rlt);
+        return rlt;
+    }
+    print_database(&tx_manager.base);
+
+    s1 = "alter table ui rename to stu_new";
+    printf("%s\n", s1);
+    rlt = run_sql(s1, &tx_manager, 0);
+    if(rlt){
+        printf("%d\n", rlt);
+        return rlt;
+    }
+    print_database(&tx_manager.base);
+
+
+    s1 = "alter table stu_new add grade int unique";
+    printf("%s\n", s1);
+    rlt = run_sql(s1, &tx_manager, 0);
+    if(rlt){
+        printf("%d\n", rlt);
+        return rlt;
+    }
+    print_database(&tx_manager.base);
+
+    s1 = "alter table stu_new rename column grade to grade_new";
+    printf("%s\n", s1);
+    rlt = run_sql(s1, &tx_manager, 0);
+    if(rlt){
+        printf("%d\n", rlt);
+        return rlt;
+    }
+    print_database(&tx_manager.base);
+
+    s1 = "alter table stu_new drop grade_new";
+    printf("%s\n", s1);
+    rlt = run_sql(s1, &tx_manager, 0);
+    if(rlt){
+        printf("%d\n", rlt);
+        return rlt;
+    }
+    print_database(&tx_manager.base);
+
+    s1 = "drop table stu_new";
+    printf("%s\n", s1);
+    rlt = run_sql(s1, &tx_manager, 0);
+    if(rlt){
+        printf("%d\n", rlt);
+        return rlt;
+    }
+    print_database(&tx_manager.base);
+}
+
+int test_tx_page(){
+    int rlt;
+    struct sql_transaction_manager tx_manager;
+    struct tx_result_select view_data;
+    memset(&tx_manager.base, 0, sizeof(struct D_base));
+    char* s1 = "drop database ui";
+//    don't delete this code block
+//    printf("%s\n", s1);
+//    rlt = run_sql(s1, &tx_manager, 0);
+//    if(rlt){
+//        printf("%d\n", rlt);
+//        return rlt;
+//    }
+
+    // sql parse
+    s1 = "create database ui";
+    printf("%s\n", s1);
+    rlt = run_sql(s1, &tx_manager, 0);
+    if(rlt){
+        printf("%d\n", rlt);
+        return rlt;
+    }
+
+
+    s1 = "use ui";
+    printf("%s\n", s1);
+    rlt = run_sql(s1, &tx_manager, 0);
+    if(rlt){
+        printf("%d\n", rlt);
+        return rlt;
+    }
+    print_database(&tx_manager.base);
+
+    s1 = "create table stu(id int default 8 unique primary key auto_increment, 'name' string(16))";
+    printf("%s\n", s1);
+    rlt = run_sql(s1, &tx_manager, 0);
+    if(rlt){
+        printf("%d\n", rlt);
+        return rlt;
+    }
+    print_database(&tx_manager.base);
+
+    s1 = "insert into stu values(1, 'qwe'), (2, 'aaa'), (999, '998f')";
+    printf("%s\n", s1);
+    rlt = run_sql(s1, &tx_manager, 0);
+    if(rlt){
+        printf("%d\n", rlt);
+        return rlt;
+    }
+    print_database(&tx_manager.base);
+
+    s1 = "select * from stu;";
+    printf("%s\n", s1);
+    rlt = run_sql(s1, &tx_manager, &view_data);
+    if(rlt){
+        printf("%d\n", rlt);
+        return rlt;
+    }
+    print_database(&tx_manager.base);
+    print_view_data(get_table_fields(&tx_manager.base, 1), 2, &view_data);
+}
+
 int test_opera(){
     int rlt = 0;
     char name[MAX_NAME_LENGTH] = "hello";
@@ -183,9 +325,20 @@ int main(int argc, char const *argv[])
 
 //    printf("%d,", sizeof(&d1[1]));
 //    printf("%d", sizeof(d1));
-//    return test_table();
+//    return test_m_table();
 //    return test_byte_convert();
 //    return test_opera();
-    return learn_regex();
+//    return learn_regex();
+//    learn_thread();
+
+
+//    char a1[] = "12345";
+//    a1[0] = 81;
+//    u_int8_t a2[10];
+//    memcpy(a2, a1, strlen(a1));
+//    printf("%s, %s", a1, a2);
+//    test_equation();
+//    test_tx_table();
+    test_tx_page();
 }
 

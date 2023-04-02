@@ -41,4 +41,11 @@ struct PAGE_DATA_LOCK{
 };
 
 
+int daemon_thread_body(struct thread_pool_t* tp);
+
+int worker_thread_body(struct thread_pool_t* tp);
+
+int learn_thread();
+
+
 #endif //MINIDB_REACTOR_H

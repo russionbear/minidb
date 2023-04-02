@@ -100,6 +100,35 @@ int count_field_offset_size(struct D_base* base, int table_id, struct D_field* f
     }
 }
 
+
+int get_table_field_num(struct D_base* base, int table_id){
+    int i, j;
+    int field_len=0;
+
+    for(i=0, j=0;j<base->field_nu;i++){
+        if(base->fields[i].table_id==0)
+            continue;
+        j++;
+        if(base->fields[i].table_id==table_id) field_len ++;
+    }
+
+    return field_len;
+}
+struct D_field* get_table_fields(struct D_base* base, int table_id){
+    int i, j;
+    int field_len= get_table_field_num(base, table_id);
+    struct D_field* fields = calloc(field_len, sizeof(struct D_field));
+
+    for(i=0,j=0;j<base->field_nu;i++){
+        if(base->fields[i].table_id==0)
+            continue;
+
+        memcpy(&fields[j], &base->fields[i], sizeof(struct D_field));
+        j++;
+    }
+
+    return fields;
+}
 int get_rest_table_index(struct D_base* base, int start_index){
     int i;
     for(i=start_index;;i++)
@@ -123,6 +152,7 @@ int is_memory_equal(const u_int8_t *d1, const u_int8_t * d2, int length){
     }
     return 1;
 }
+
 int m_string_in(const u_int8_t* s1, int len1, const u_int8_t* s2, int len2){
     int i=0, j=0;
     for(i=0;i<len1;i++){
@@ -258,10 +288,10 @@ int m_base(FILE *fp, u_int8_t is_read, struct D_base* base){
 
     fseek(fp, 0, SEEK_SET);
     if(is_read){
-        if(fread(base, (u_int32_t)sizeof(struct D_base), 1, fp)!=1)
+        if(fread(base, (int32_t)sizeof(struct D_base), 1, fp)!=1)
             return 2;
     }else{
-        if(fwrite(base, (u_int32_t)sizeof(struct D_base), 1, fp)!=1)
+        if(fwrite(base, (int32_t)sizeof(struct D_base), 1, fp)!=1)
             return 2;
     }
 
@@ -273,10 +303,10 @@ int m_base_info(FILE *fp, u_int8_t is_read, struct D_base* base){
 
     fseek(fp, 0, SEEK_SET);
     if(is_read){
-        if(fread(base, sizeof(base->name)+sizeof(int)*2, 1, fp)!=1)
+        if(fread(base, sizeof(base->name)+sizeof(int)*3, 1, fp)!=1)
             return 2;
     }else{
-        if(fwrite(base, sizeof(base->name)+sizeof(int)*2, 1, fp)!=1)
+        if(fwrite(base, sizeof(base->name)+sizeof(int)*3, 1, fp)!=1)
             return 2;
     }
 
@@ -339,15 +369,14 @@ int m_page(FILE *fp, u_int8_t is_read, struct D_base* base, int page_index, stru
     fseek(fp, (u_int32_t)(sizeof(struct D_base)+PAGE_SIZE*page_index),
           SEEK_SET);
 
-    if(base->page_ids[page_index]==0)
-        return 3;
-    if((table_id=base->tables[base->page_ids[page_index]].table_id) == 0)
-        return 3;
-
     if(is_read){
+        if(base->page_ids[page_index]==0||base->tables[base->page_ids[page_index]-1].table_id==0)
+            return 3;
+        table_id = base->page_ids[page_index];
         if(fread(page_header, sizeof(struct D_page)+ count_page_max_rows(base->tables[table_id - 1].row_size) * sizeof(u_int8_t), 1, fp) != 1)
             return 2;
     }else{
+        table_id = page_header->table_id;
         if(fwrite(page_header, sizeof(struct D_page)+ count_page_max_rows(base->tables[table_id - 1].row_size) * sizeof(u_int8_t), 1, fp) != 1)
             return 2;
     }
@@ -400,10 +429,13 @@ int m_row(FILE *fp, u_int8_t is_read, struct D_base* base, int page_index, int r
     if(fp==0||base==0)
         return 1;
 
-    if(base->page_ids[page_index]==0)
-        return 3;
-    if((table_id=base->tables[base->page_ids[page_index]].table_id) == 0)
-        return 3;
+    table_id = base->page_ids[page_index];
+    if(table_id==0)
+        return 7;
+//    if(base->page_ids[page_index]==0)
+//        return 3;
+//    if((table_id=base->tables[base->page_ids[page_index]].table_id) == 0)
+//        return 3;
     row_size = base->tables[table_id-1].row_size;
     row_begin_offset = (int32_t)(sizeof(struct D_base)+PAGE_SIZE*page_index+count_page_max_rows(row_size)*sizeof(u_int8_t)+sizeof(struct D_page))+row_size*row_index;
 
@@ -458,10 +490,9 @@ int m_rows(FILE *fp, u_int8_t is_read, struct D_base* base, int page_index, int 
     if(fp==0||base==0)
         return 1;
 
-    if(base->page_ids[page_index]==0)
-        return 3;
-    if((table_id=base->tables[base->page_ids[page_index]].table_id) == 0)
-        return 3;
+    table_id = base->page_ids[page_index];
+    if(table_id==0)
+        return 7;
     row_size = base->tables[table_id-1].row_size;
     row_begin_offset = (int32_t)(sizeof(struct D_base)+PAGE_SIZE*page_index+count_page_max_rows(row_size)*sizeof(u_int8_t)+sizeof(struct D_page))+row_size*row_offset;
 
@@ -799,6 +830,53 @@ int m_rename_field(FILE *fp, struct D_base* base, int field_id, char* new_name){
     return m_field(fp, 0, base, field_id-1);
 }
 
+///**
+// *
+// * @param fp
+// * @param base
+// * @param table_id
+// * @param value_len
+// * @param values
+// * @return
+// */
+//int m_insert_rows(FILE *fp, struct D_base* base, int table_id, int value_len, u_int8_t * values){
+//    int row_size, page_header_size;
+//    int i, j;
+//    int rlt;
+//    u_int8_t * page_rows=0;
+//    struct D_page *page;
+//    if(fp==0||base==0)
+//        return 1;
+//
+//    row_size = base->tables[table_id-1].row_size;
+//    page_header_size = (int32_t)(sizeof(struct D_page) + count_page_max_rows(row_size) * sizeof(u_int8_t));
+//
+//    page_rows = calloc(1, PAGE_SIZE- count_page_header_size(row_size));
+//    page = calloc(1, page_header_size);
+//
+//    for(i=0;base->page_ids[i]!=0;i++){
+//        if(base->page_ids[i]!=table_id)
+//            continue;
+//        m_page(fp, 1, base, i, page);
+//        if(page->row_nu==0)
+//            continue;
+//
+//        m_rows(fp, 1, base, i, 0, page->row_nu, page_rows);
+//
+////        rlt = arg_func(base, i, page, page_rows, arg_func_arg);
+//        switch (rlt) {
+//            case 1: free(page_rows);free(page);return 0;
+//            case 2: free(page_rows);free(page);return 2;
+//            default:
+//                break;
+//        }
+//    }
+//
+//    free(page_rows);
+//    free(page);
+//    return 0;
+//}
+
 
 //int m_iter_table_rows(FILE *fp, struct D_base* base, int table_id, int *field_offset_size, int field_len, iter_arg_func arg_func, void* arg_func_arg){
 //    int row_size, page_size, tmp_field_size;
@@ -846,9 +924,9 @@ int m_rename_field(FILE *fp, struct D_base* base, int field_id, char* new_name){
 //}
 
 
-int m_iter_page_rows(FILE *fp, struct D_base* base, int table_id, iter_arg_func arg_func, void* arg_func_arg){
+int m_iter_page(FILE *fp, struct D_base* base, u_int8_t is_insert, int table_id, iter_arg_func arg_func, void* arg_func_arg){
     int row_size, page_size;
-    int i, j, k;
+    int i=0, j, k;
     int rlt;
     u_int8_t * page_rows=0;
     struct D_page *page;
@@ -862,29 +940,120 @@ int m_iter_page_rows(FILE *fp, struct D_base* base, int table_id, iter_arg_func 
     page_rows = calloc(1, PAGE_SIZE- count_page_header_size(row_size));
     page = calloc(1, page_size);
 
-    for(i=0;base->page_ids[i]!=0;i++){
-        if(base->page_ids[i]!=table_id)
-            continue;
-        m_page(fp, 1, base, i, page);
-        if(page->row_nu==0)
-            continue;
+    if(is_insert){
+        for(i=0, j=0;;i++){
+            if(j>=base->page_nu){
+                memset(page, 0, page_size);
+                page->table_id = table_id;
+                rlt = m_page(fp, 0, base, i, page);
+                base->page_ids[i] = table_id;
+                base->page_nu++;
+                rlt |= m_base_info(fp, 0, base);
+            }else{
+                rlt = m_page(fp, 1, base, i, page);
+            }
 
-        m_rows(fp, 1, base, i, 0, page->row_nu, page_rows);
+            if(rlt){
+                free(page_rows);free(page);
+                return rlt;
+            }
+            if(page->row_nu){
+                rlt = m_rows(fp, 1, base, i, 0, page->row_nu, page_rows);
+                if(rlt){
+                    free(page_rows);
+                    free(page);
+                    return rlt;
+                }
+            }else{
+                memset(page_rows, 0, PAGE_SIZE- count_page_header_size(row_size));
+            }
+            rlt = arg_func(base, i, page, page_rows, arg_func_arg);
+            switch (rlt) {
+                case 1: free(page_rows);free(page);return 0;
+                case 2: free(page_rows);free(page);return 2;
+                default:
+                    break;
+            }
+        }
+    }else{
+        for(i=0, j=0;j<base->page_nu;i++){
+            if(base->page_ids[i]!=0)
+                j++;
+            if(base->page_ids[i]!=table_id)
+                continue;
+            rlt = m_page(fp, 1, base, i, page);
 
-        rlt = arg_func(base, i, page, page_rows, arg_func_arg);
-        switch (rlt) {
-            case 1: free(page_rows);free(page);return 0;
-            case 2: free(page_rows);free(page);return 2;
+            if(rlt){
+                free(page_rows);free(page);
+                return rlt;
+            }
+            rlt = m_rows(fp, 1, base, i, 0, page->row_nu, page_rows);
+            if(rlt){
+                free(page_rows); free(page);
+                return rlt;
+            }
+
+            rlt = arg_func(base, i, page, page_rows, arg_func_arg);
+            switch (rlt) {
+                case 1: free(page_rows);free(page);return 0;
+                case 2: free(page_rows);free(page);return 2;
+                default:
+                    break;
+            }
+        }
+    }
+
+    free(page_rows); free(page);
+    return 0;
+}
+
+/**
+ * 阉割版query， 只能select + limit 或者 delete all
+ * @param base
+ * @param page_index
+ * @param page_header
+ * @param row_data
+ * @param argv
+ * @return
+ */
+int m_i_query_rows2(struct D_base* base, int page_index, struct D_page* page_header, u_int8_t* row_data, void* argv){
+    int i, j;
+    struct Q_select_rows* query = (struct Q_select_rows*)argv;
+
+    if(query->result_offset == query->result_length) // 一遍能被yield调用
+        return 1;
+
+    i = 0; j= 0;
+    // skip
+    if(query->rest_skip_row_num){
+        for(i=0, j=0;j<page_header->row_nu;i++) {
+            if (page_header->m_row_mask[i] == 0) continue;
+            j++;
+            query->rest_skip_row_num --;
+            if(!query->rest_skip_row_num)
+                break;
+        }
+    }
+
+    for(;j<page_header->row_nu;i++){
+        if(page_header->m_row_mask[i]==0) continue;
+        j++;
+        switch (query->opera_type) {
+            case OP_SELECT:
+                // 提取需要的字段
+                query->result_data[query->result_offset] = calloc(1, query->need_field_row_size);
+                memcpy(query->result_data[query->result_offset], row_data + query->need_field_row_size * i, query->need_field_row_size);
+                query->result_offset ++;
+                if(query->result_offset == query->result_length)
+                    return 1;
+                break;
             default:
                 break;
         }
     }
 
-    free(page_rows);
-    free(page);
     return 0;
 }
-
 
 int m_i_query_rows(struct D_base* base, int page_index, struct D_page* page_header, u_int8_t* row_data, void* argv){
     int i, j;
@@ -899,7 +1068,7 @@ int m_i_query_rows(struct D_base* base, int page_index, struct D_page* page_head
     for(i=0, j=0;j<page_header->row_nu;i++)
         if(page_header->m_row_mask[i]!=0){
 
-            /// refresh cache data
+            /// refresh cache data 跟update
             // refresh field _data
             for(h=0, h1=select_where->condition.field_value_offset_len[0], tmp_data_offset=0, row_data_offset=0;h<select_where->prim_field_len;h++){
                 if(select_where->prim_field_offset_size[h*3]==select_where->condition.nodes[h1].field_id){
@@ -1004,12 +1173,13 @@ int m_i_query_rows(struct D_base* base, int page_index, struct D_page* page_head
 int m_i_insert_rows(struct D_base* base, int page_index, struct D_page* page_header, u_int8_t* row_data, void* argv) {
     int i, j, prim_offset;
     struct Q_insert_rows *query = (struct Q_insert_rows *) argv;
+    int rlt;
     prim_offset = query->current_offset;
 
     if (query->current_offset == query->insert_data_length) // 一遍能被yield调用
         return 1;
 
-    for (i = 0, j = 0; j < page_header->row_nu; i++)
+    for (i = 0, j = 0; i< query->max_page_rows; i++)
         if (page_header->m_row_mask[i] == 0) {
             memcpy(
                     row_data+ i * query->row_size,
@@ -1025,11 +1195,15 @@ int m_i_insert_rows(struct D_base* base, int page_index, struct D_page* page_hea
             return 0;
         case 1:
             m_row(query->write_fp, 0, base, page_index, i, row_data + i * query->row_size);
+            break;
         default:
             m_rows(query->write_fp, 0, base, page_index, 0, query->max_page_rows, row_data);
+            break;
     }
-    m_page(query->write_fp, 0, base, page_header->table_id - 1, page_header);
-    if(query->current_offset == prim_offset){
+    rlt = m_page(query->write_fp, 0, base, page_index, page_header);
+    if(rlt)
+        return 2;
+    if(query->current_offset == query->insert_data_length){
         return 1;
     }
     return 0;
@@ -1040,7 +1214,7 @@ int m_select_rows(FILE *read_fp, struct D_base* base, int table_id, struct D_fie
     struct Q_select_rows* select_rows;
 
 
-    return m_iter_page_rows(read_fp, base, table_id, m_i_query_rows, &select_rows);
+    return m_iter_page(read_fp, base, 0, table_id, m_i_query_rows, &select_rows);
 
 }
 
@@ -1190,246 +1364,3 @@ int m_insert_rows(FILE *fp, struct D_base* base, int table_id, struct D_field* f
 
     return 0;
 }
-
-int m_delete_rows(FILE *fp, struct D_base* base, struct R_query * query){
-    return 0;
-}
-
-int m_update_rows(FILE *fp, struct D_base* base, struct R_query * query){
-
-    return 0;
-}
-
-
-/** join select*/
-
-//// 0 ok, 1, end, 2 exit, 3 empty
-//int m_yield_table_rows(
-//        FILE *fp, struct D_base* base, int table_id, int *field_offset_size, int field_len, struct Q_yield_func_args* yield_args
-//){
-//    int i=yield_args->y_page_b_offset, j=yield_args->y_row_b_offset, k=0;
-//    u_int64_t rlt;
-//
-//    if(yield_args->y_page_b_offset==-1)
-//        return 1;
-//
-//    for(;base->page_ids[i]!=0;i++)
-//        if(base->page_ids[i]==table_id)
-//            break;
-//
-//    if(base->page_ids[i]==0){
-//        yield_args->y_page_b_offset =-1;
-//        return 1;
-//    }
-//    yield_args->y_page_b_offset = i;
-//
-//
-//    if(yield_args->y_page==0){
-//        yield_args->y_page = calloc(1, yield_args->y_page_header_size);
-//        m_page(fp, 1, base, i, yield_args->y_page);
-//    }
-//
-//    for(;j<yield_args->y_page_max_rows;j++)
-//        if(yield_args->y_page->m_row_mask[j]!=0)
-//            break;
-//
-//    yield_args->y_row_b_offset = j;
-//
-//    if(j>=yield_args->y_page_max_rows)
-//    {
-//        free(yield_args->y_page);
-//        yield_args->y_page = 0;
-//        yield_args->y_row_b_offset = 0 ;
-//        yield_args->y_page_b_offset ++;
-//        return 3;
-//    }
-//
-//    rlt = m_row_field(fp, 1, base, i, j, field_offset_size, field_len, yield_args->y_row_data);
-//
-//    if(rlt!=0)
-//        return 2;
-//
-//    yield_args->y_row_b_offset ++;
-//    return 0;
-//}
-
-
-//
-//// 0: ok, 1: full, 2: error
-//int m_f_join_select_rows(struct Q_select_rows* select_where, int* field_offset_size, int field_len, u_int8_t* row_data){
-//    int h=0, h1, tmp_data_offset, row_data_offset;
-//
-//    struct R_arith_node* tmp_arith_node=0;
-//
-//    if(select_where->result_offset==select_where->result_length) // 一遍能被yield调用
-//        return 1;
-//
-//    /// refresh cache data
-//    // refresh field _data
-//    for(h=0, h1=select_where->condition.field_value_offset_len[0], tmp_data_offset=0, row_data_offset=0;h<field_len;h++){
-//        if(field_offset_size[h*3]==select_where->condition.nodes[h1].field_id){
-//            memcpy(select_where->condition.nodes[h1].value+tmp_data_offset, row_data+row_data_offset, field_offset_size[h*3+1]);
-//            h1++;
-//            tmp_data_offset += field_offset_size[h*3+2];
-//        }
-//        row_data_offset += field_offset_size[h*3+2];
-//    }
-//    // refresh middle data
-//    for(h=select_where->condition.mid_value_offset_len[0];h<select_where->condition.mid_value_offset_len[1];h++){
-//        tmp_arith_node = &select_where->condition.nodes[h];
-//        b_arith_opera(
-//                &select_where->condition.nodes[tmp_arith_node->param_node_ids[0]].custom_field,
-//                &select_where->condition.nodes[tmp_arith_node->param_node_ids[1]].custom_field,
-//                tmp_arith_node->type,
-//                select_where->condition.nodes[tmp_arith_node->param_node_ids[0]].value,
-//                select_where->condition.nodes[tmp_arith_node->param_node_ids[1]].value,
-//                tmp_arith_node->value
-//        );
-//    }
-//    // refresh logical data
-//    if(tmp_arith_node==0)
-//        return 2;
-//    if(tmp_arith_node->value[0]){
-//        // 提取需要的字段
-//        row_data_offset = 0;
-//        tmp_data_offset = 0;
-//        select_where->result_data[select_where->result_offset] = calloc(1, select_where->need_field_row_size);
-//        for(h=0;h<field_len;h++){
-//            row_data_offset += field_offset_size[h*3+1];
-//            if(field_offset_size[h*3]!=select_where->need_field_offset_size[h1*3])
-//                continue;
-//            memcpy(
-//                    select_where->result_data[select_where->result_offset]+tmp_data_offset,
-//                    row_data+row_data_offset,
-//                    field_offset_size[h*3+2]);
-//            tmp_data_offset += field_offset_size[h*3+2];
-//            h1++;
-//            if(h1==select_where->need_field_len)
-//                break;
-//        }
-//        select_where->result_offset ++;
-//
-//        if(select_where->result_offset==select_where->result_length)
-//            return 1;
-//    }
-//    return 0;
-//}
-//
-//
-//int m_join_select(struct D_base* base, struct Q_join_select* join_select){
-//    int i, j, k;
-//    u_int64_t rlt;
-//    u_int8_t* query_row_data;
-//    int n_for_mark[join_select->joined_table_nu];
-//    //初始化yield
-//    struct Q_yield_func_args yield_args[join_select->joined_table_nu];
-//    for(i=0, k=0;i<join_select->joined_table_nu;i++){
-//        yield_args[i].y_page_max_rows = (int)count_page_max_rows(base->tables[join_select->table_ids[i]].row_size);
-//        yield_args[i].y_page_header_size = (int)count_page_header_size(base->tables[join_select->table_ids[i]].row_size);
-//        yield_args[i].y_query_row_size = 0;
-//        for(j=0;j<join_select->table_fields[i].need_field_len;j++)
-//            yield_args[i].y_query_row_size += join_select->table_fields[i].need_field_offset_size[j*3+2];
-//        k += yield_args[i].y_query_row_size;
-//        yield_args[i].y_page_b_offset = 0;
-//        yield_args[i].y_row_b_offset = 0;
-//        yield_args[i].y_page = 0;
-//    }
-//
-//    query_row_data = calloc(1, k);
-//    for(i=0, k=0;i<join_select->joined_table_nu;i++) {
-//        yield_args[i].y_row_data = query_row_data+k;
-//        k += yield_args[i].y_query_row_size;
-//    }
-//
-//    memset(query_row_data, 0, sizeof(int)*join_select->joined_table_nu);
-//    rlt=0;
-////    while(rlt==0){
-//////        rlt =
-////    }
-//}
-//
-//
-//int m_join2table_select(struct D_base* base, struct Q_join_select* join_select){
-//    int i, j, k;
-//    int rlt;
-////    u_int8_t has1, has2;
-//    u_int8_t* query_row_data;
-//    //初始化yield
-//    struct Q_yield_func_args yield_args[join_select->joined_table_nu];
-//    for(i=0, k=0;i<join_select->joined_table_nu;i++){
-//        yield_args[i].y_page_max_rows = (int)count_page_max_rows(base->tables[join_select->table_ids[i]].row_size);
-//        yield_args[i].y_page_header_size = (int)count_page_header_size(base->tables[join_select->table_ids[i]].row_size);
-//        yield_args[i].y_query_row_size = 0;
-//        for(j=0;j<join_select->table_fields[i].need_field_len;j++)
-//            yield_args[i].y_query_row_size += join_select->table_fields[i].need_field_offset_size[j*3+2];
-//        k += yield_args[i].y_query_row_size;
-//        yield_args[i].y_page_b_offset = 0;
-//        yield_args[i].y_row_b_offset = 0;
-//        yield_args[i].y_page = 0;
-//    }
-//
-//    query_row_data = calloc(1, k);
-//    memset(query_row_data, 0, sizeof(int)*join_select->joined_table_nu);
-//    for(i=0, k=0;i<join_select->joined_table_nu;i++) {
-//        yield_args[i].y_row_data = query_row_data+k;
-//        k += yield_args[i].y_query_row_size;
-//    }
-//
-//    rlt = 0;
-////    has1 = has2 = 0;
-//
-//    do{
-//        rlt = m_yield_table_rows(
-//                join_select->fps[1], base, join_select->table_ids[1],
-//                join_select->table_fields[1].need_field_offset_size,
-//                join_select->table_fields[1].need_field_len, &yield_args[1]);
-//    } while (rlt==3);
-//    if(rlt==1||rlt==2){
-//        free(query_row_data);
-//        return 0;
-//    }
-//
-//    while(rlt==0){
-//        do{
-//            rlt = m_yield_table_rows(
-//                    join_select->fps[0], base, join_select->table_ids[0],
-//                    join_select->table_fields[0].need_field_offset_size,
-//                    join_select->table_fields[0].need_field_len, &yield_args[0]);
-//        } while (rlt==3);
-//        if(rlt==1){
-//            if(yield_args[0].y_page!=0){
-//                free(yield_args[0].y_page);
-//                yield_args[0].y_page = 0;
-//            }
-//            yield_args[0].y_page_b_offset = 0;
-//            yield_args[0].y_row_b_offset = 0;
-//
-//
-//            do{
-//                rlt = m_yield_table_rows(
-//                        join_select->fps[1], base, join_select->table_ids[1],
-//                        join_select->table_fields[1].need_field_offset_size,
-//                        join_select->table_fields[1].need_field_len, &yield_args[1]);
-//            } while (rlt==3);
-//            if(rlt==1||rlt==2){
-//                return 0;
-//            }
-//            continue;
-//
-//        }
-//        else if(rlt==0){
-////            rlt = m_f_join_select_rows(join_select->result_row_field, )
-//// stop develop join select
-//            continue;
-//        }else{
-//            break;
-//        }
-//
-//    }
-//    free(query_row_data);
-//    return 0;
-//}
-
-
-// ------------------------------------
-

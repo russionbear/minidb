@@ -4,6 +4,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <dirent.h>
 
 #define MAX_NAME_LENGTH 256
 #define MAX_STRING_LENGTH 256
@@ -48,6 +49,7 @@ struct D_field{
     // is auto increase, allow null, is default_null, is unique, is primary
     // is auto increase, is unique, is primary
     unsigned char field_mask;
+    u_int8_t* default_value;
     int current_auto_id;  // must be int
 //    char default_value[MAX_STRING_LENGTH];
 };
@@ -59,12 +61,13 @@ struct D_table{
 };
 
 struct D_base{
-    // 顺序排位已固定
-
     char name[MAX_NAME_LENGTH];
 
     int table_nu;
     int field_nu;
+    int page_nu;
+
+    // 以上时base_info
 
     struct D_table tables[MAX_TABLE_NU];
     struct D_field fields[MAX_FILED_NU];
@@ -189,6 +192,8 @@ u_int64_t count_page_max_rows(int row_size);
 u_int64_t count_page_header_size(int row_size);
 int count_field_offset_size(struct D_base* base, int table_id, struct D_field* fields, int length, int * rlt);
 
+int get_table_field_num(struct D_base* base, int table_id);
+struct D_field* get_table_fields(struct D_base* base, int table_id);
 int get_rest_table_index(struct D_base* base, int start_index);
 int get_rest_field_index(struct D_base* base, int start_index);
 
@@ -234,6 +239,7 @@ struct Q_select_rows{
     enum Q_OPERA_TYPE opera_type;
     FILE *write_fp;
 
+    int rest_skip_row_num;
     int result_length;
     int result_offset;
     u_int8_t * result_data[0];
@@ -252,55 +258,9 @@ struct Q_insert_rows{
 };
 
 
-int m_iter_page_rows(FILE *fp, struct D_base* base, int table_id, iter_arg_func arg_func, void* arg_func_arg);
+int m_iter_page(FILE *fp, struct D_base* base, u_int8_t is_insert, int table_id, iter_arg_func arg_func, void* arg_func_arg);
 int m_i_query_rows(struct D_base* base, int page_index, struct D_page* page_header, u_int8_t* row_data, void* argv);
+int m_i_query_rows2(struct D_base* base, int page_index, struct D_page* page_header, u_int8_t* row_data, void* argv);
 int m_i_insert_rows(struct D_base* base, int page_index, struct D_page* page_header, u_int8_t* row_data, void* argv);
 
-//int m_i_select_rows(struct D_base* base, int page_index, struct D_page* page_header, u_int8_t *row_data, void* argv);
-//int m_i_insert_rows(struct D_base* base, int page_index, struct D_page* page_header, u_int8_t* row_data, void* argv);
-//int m_i_delete_rows(struct D_base* base, int page_index, struct D_page* page_header, u_int8_t* row_data, void* argv);
-//int m_i_update_rows(struct D_base* base, int page_index, struct D_page* page_header, u_int8_t* row_data, void* argv);
-
-int m_select_rows(FILE *read_fp, struct D_base* base, int table_id, struct D_field* fields, int field_len, int max_value_len, u_int8_t ** values);
-int m_insert_rows(FILE *fp, struct D_base* base, int table_id, struct D_field* fields, int field_len, int value_len, u_int8_t * values);
-int m_delete_rows(FILE *fp, struct D_base* base, struct R_query * query);
-
-int m_update_rows(FILE *fp, struct D_base* base, struct R_query * query);
-
-
-/**/
-
-// join select
-
-//struct Q_join_select{
-//
-//    struct R_arith_nodes condition;
-//
-//    int joined_table_nu;
-//    int *table_ids;
-//    int *table_row_offset;
-//    struct Q_select_rows * table_fields; // 只用中间三个字段
-//    FILE **fps;
-//
-//    struct Q_select_rows result_row_field;
-//};
-//
-//
-//struct Q_yield_func_args{
-//    int y_page_max_rows;
-//    int y_page_header_size;
-//    int y_query_row_size;
-//
-//    u_int8_t *y_row_data;
-//
-//    int y_page_b_offset;
-//    int y_row_b_offset;
-//    struct D_page *y_page;
-//};
-//
-//int m_join_select(struct D_base* base, struct Q_join_select* join_select);
-//
-//int m_join2table_select(struct D_base* base, struct Q_join_select* join_select);
-
-// -------------------------------------
 #endif  // MINIDB_TABLE_H

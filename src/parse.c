@@ -4,87 +4,23 @@
 
 #include <regex.h>
 #include <string.h>
-#include "parse.h"
-#include "table.h"
+#include "utils.h"
+#include "transaction.h"
 #include <ctype.h>
 
 
-int count_appeared_nu(const char* input_str, const char* pattern, int* match_offset_size, char is_char){
-    int i=0;
-    regex_t reg;
-    const char* p1=0;
-    const size_t match_sz = 1;
-    regmatch_t p_match[1];
-    int c = regcomp(&reg, pattern, REG_EXTENDED);
-    if (0 != c)
-    {
-        return -1;
-    }
-    /** 起始匹配的偏移量 */
-    int offset = 0;
-    int match_count = 0;
-    do {
-        p1 = input_str + offset;
-        c = regexec(&reg, p1, match_sz, p_match, 0);
-        if (REG_NOMATCH == c)
-            break;
-        else if (0 == c)
-        {
-            if(match_offset_size!=0){
-                if(is_char){
-                    match_offset_size[i] = p_match[0].rm_so + offset;
-                }else{
-                    match_offset_size[i*2] = p_match[0].rm_so + offset;
-                    match_offset_size[i*2+1] = p_match[0].rm_eo - p_match[0].rm_so;
-                }
-                i++;
-            }
-            ++match_count;
-            offset += p_match[0].rm_eo;
-            continue;
-        }
 
-    } while (1);
-    regfree(&reg);
-    return match_count;
-}
-
-//int count_appeared_num_width_range()
-
-/**
- *
- * @param s1
- * @param s1_len
- * @param s2
- * @param s2_len
- * @param flag 1 << 1: 是否忽略大小写
- * @return
- */
-u_int8_t is_string_equal(const char* s1, const char* s2, int str_len, int flag){
-    int i=0;
-    for(;i<str_len;i++){
-        if(flag&1){
-            if(tolower(s1[i])!= tolower(s2[i]))
-                return 0;
-        }else{
-            if(s1[i]!= s2[i])
-                return 0;
-        }
-    }
-    return 1;
-}
-
-
-int parse_create_table_from_sql(struct SQL_STRUCTURE * sql_s){
+int parse_create_table_from_sql(struct SQL_STRUCTURE * sql_s, struct D_base *base){
     int bracket_num;
     int *bracket_offset=0;
     int i, j;
-    bracket_offset = count_appeared_nu(sql_s->full_sql, "[()]", 0, 1);
-    if(bracket_num<4)
+    bracket_num = count_appeared_nu(sql_s->full_sql, "[()]", 0, 1);
+    if(bracket_num<2)
         return 1;
     bracket_offset = calloc(bracket_num, sizeof(int));
     count_appeared_nu(sql_s->full_sql, "[()]", bracket_offset, 1);
 
+    // 排除字符串中的 字符
     for(i=0;i<bracket_num;i++)
         for(j=0;j<sql_s->world_length;j++){
             if(bracket_offset[i]<sql_s->world_offset_size[j*2])
@@ -93,40 +29,134 @@ int parse_create_table_from_sql(struct SQL_STRUCTURE * sql_s){
                 bracket_offset[i] = -1;
                 break;
             }
-
         }
 
-    sql_s->create_table_range[0] = bracket_offset[0];
+    // 选值
+    i = 0;
+    while(bracket_offset[i]==-1) i++;
+    sql_s->create_table_range[0] = bracket_offset[i];
+    i = bracket_num-1;
+    while(bracket_offset[i]==-1) i--;
     sql_s->create_table_range[1] = bracket_offset[bracket_num-1];
 
-    bracket_offset = count_appeared_nu(sql_s, "[]", 0, 1);
-    bracket_offset = calloc(bracket_num, sizeof(int));
-    bracket_offset = count_appeared_nu(sql_s, ",", bracket_offset, 1);
+    bracket_num = count_appeared_nu(sql_s->full_sql, ",", 0, 1);
     free(bracket_offset);
+    bracket_offset = calloc(bracket_num, sizeof(int));
+    count_appeared_nu(sql_s->full_sql, ",", bracket_offset, 1);
+
+    sql_s->create_table_field_split_len = 0;
+    // 排除字符串中的 字符
+    for(i=0;i<bracket_num;i++){
+        if(bracket_offset[i]<sql_s->create_table_range[0]||bracket_offset[i]>sql_s->create_table_range[1]){
+            bracket_offset[i] = -1;
+            continue;
+        }
+        for(j=0;j<sql_s->world_length;j++){
+            if(bracket_offset[i]<sql_s->world_offset_size[j*2])
+                continue;
+            else if(bracket_offset[i]<sql_s->world_offset_size[j*2+1]){
+                bracket_offset[i] = -1;
+                j = -j;
+                break;
+            }
+        }
+        if(j>0)
+            sql_s->create_table_field_split_len ++;
+    }
+
+    // 赋值
+    sql_s->create_table_field_split_offset = calloc(sql_s->create_table_field_split_len, sizeof(int));
+    for(i=0, j=0;i<bracket_num;i++)
+        if(bracket_offset[i]!=-1)
+            sql_s->create_table_field_split_offset[j++] = bracket_offset[i];
+    free(bracket_offset);
+
+    return 0;
 }
 
-int parse_select_from_sql(struct SQL_STRUCTURE * sql_s){
-
+int parse_select_from_sql(struct SQL_STRUCTURE * sql_s, struct D_base *base){
+    return 0;
 }
 
-int parse_insert_from_sql(struct SQL_STRUCTURE * sql_s){
+int parse_insert_from_sql(struct SQL_STRUCTURE * sql_s, struct D_base *base){
+    int bracket_num;
+    int *bracket_offset=0;
+    int i, j, k;
+    int kw_value_index;
+    bracket_num = count_appeared_nu(sql_s->full_sql, "[()]", 0, 1);
+    if(bracket_num<2)
+        return 1;
+    bracket_offset = calloc(bracket_num, sizeof(int));
+    count_appeared_nu(sql_s->full_sql, "[()]", bracket_offset, 1);
 
+    for(i=3, kw_value_index = 3;i<sql_s->world_length;i++){
+        if(get_str_hash(sql_s->full_sql+sql_s->world_offset_size[2*i], sql_s->world_offset_size[2*i+1])==VALUE
+           &&sql_s->full_sql[sql_s->world_offset_size[2*i-1]]!='\\') {
+            kw_value_index = i;
+            break;
+        }
+    }
+    sql_s->use_custom_fields = kw_value_index != 3;
+
+    // 排除字符串中的 字符
+    for(i=0, k = bracket_num;i<bracket_num;i++)
+        for(j=0;j<sql_s->world_length;j++){
+            if(bracket_offset[i]<sql_s->world_offset_size[j*2])
+                continue;
+            else if(bracket_offset[i]<sql_s->world_offset_size[j*2+1]){
+                bracket_offset[i] = -1;
+                k--;
+                break;
+            }
+        }
+    if(k<2){
+        free(bracket_offset);
+        return 1;
+    }
+
+    // 选值
+    i = 0;
+    if(sql_s->use_custom_fields){
+        while(bracket_offset[i]==-1) i++;
+        sql_s->insert_field_range[0] = bracket_offset[i];
+        i++;
+        while(bracket_offset[i]==-1) i++;
+        sql_s->insert_field_range[1] = bracket_offset[i];
+        i++;
+
+        sql_s->insert_value_length = (k-2)/2;
+    }
+    else{
+        sql_s->insert_value_length = k/2;
+    }
+
+    sql_s->insert_value_ranges = calloc(sql_s->insert_value_length*2, sizeof(int));
+    for(j=0;j<sql_s->insert_value_length*2;j++){
+        while(bracket_offset[i]==-1) i++;
+        sql_s->insert_value_ranges[j] = bracket_offset[i++];
+    }
+
+    free(bracket_offset);
+    return 0;
 }
 
-int parse_where_from_sql(struct SQL_STRUCTURE * sql_s){
-
+int parse_where_from_sql(struct SQL_STRUCTURE * sql_s, struct D_base *base){
+    return 0;
 }
 
 
-int pare_sql_from_string(struct SQL_STRUCTURE * sql_s){
+int pare_sql_from_string(struct SQL_STRUCTURE * sql_s, struct D_base *base){
     int i, j, k1;
 
     int split_count = 0;
     int *split_index=0;
     int world_count = 0;
     int* world_offset_size=0;
-    int rlt;
+    int rlt=0;
+    char* tmp_string1=0, *tmp_string2=0, *tmp_string3;
+    FILE *fp;
 
+    // 提取字符串
     split_count = count_appeared_nu(sql_s->full_sql, "[^\\]'", 0, 1);
     if(split_count%2){
         sql_s->can_be_used = 0;
@@ -135,19 +165,24 @@ int pare_sql_from_string(struct SQL_STRUCTURE * sql_s){
     split_index = calloc(split_count, sizeof(int));
     count_appeared_nu(sql_s->full_sql, "[^\\]'", split_index, 1);
 
-    world_count = count_appeared_nu(sql_s->full_sql, "\\w+", 0, 0);
+    // 提取单词 和 符号
+    world_count = count_appeared_nu(sql_s->full_sql, "(\\w+)|([*+-/%=!><]+)", 0, 0);
     if(world_count<=1){
         free(split_index);
         return 2;
     }
     world_offset_size = calloc(world_count*2, sizeof(int));
-    count_appeared_nu(sql_s->full_sql, "\\w+", world_offset_size, 0);
+    count_appeared_nu(sql_s->full_sql, "(\\w+)|([*+-/%=!><]+)", world_offset_size, 0);
 
     // 排除字符串中的字符串
     sql_s->world_length = 0;
     for(i=0;i<world_count;i++){
         for(j=0;j<split_count/2;j++){
-            if(split_index[j*2]<world_offset_size[i*2]&&split_index[j*2+1]>world_offset_size[i*2]+world_offset_size[i*2+1]){
+            if(split_index[j*2]<world_offset_size[i*2]&&split_index[j*2+1]>=world_offset_size[i*2]+world_offset_size[i*2+1]){
+                world_offset_size[i*2] = -1;
+                world_offset_size[i*2+1] = 0;
+                break;
+            }else if(world_offset_size[i*2+1]==1&&sql_s->full_sql[world_offset_size[i*2]]==','){
                 world_offset_size[i*2] = -1;
                 world_offset_size[i*2+1] = 0;
                 break;
@@ -158,40 +193,55 @@ int pare_sql_from_string(struct SQL_STRUCTURE * sql_s){
     }
 
     // 将 字符串 和 world 的位置写入sql_structure
-    sql_s->world_length += split_count / 2;
     sql_s->world_offset_size = calloc(sql_s->world_length*2, sizeof(int));
-    sql_s->str_value_count = split_count/2;
     sql_s->str_value_mark_arr = calloc(sql_s->world_length, sizeof(int));
     memset(sql_s->str_value_mark_arr, 0, sizeof(unsigned char)*sql_s->world_length);
-
     i=0; j=0; k1=0;
-    while(i!=world_count&&j!=(split_count/2)){
-        if(i==world_count||world_offset_size[i*2]>split_index[j*2]){
-            // 排除空字符串
-            if(split_index[j*2+1]-split_index[j*2]-1==0){
-                j++;
+    if(split_count==0){ // 没有字符串
+        for(;i<world_count;i++){
+            if(world_offset_size[i*2]==-1)
+                continue;
+            if(world_offset_size[i*2+1]==1&&sql_s->full_sql[world_offset_size[i*2]]==','){
                 continue;
             }
-            sql_s->world_offset_size[k1*2] = split_index[j*2]+1;
-            sql_s->world_offset_size[k1*2+1] = split_index[j*2+1]-split_index[j*2]-1;
-
-            sql_s->str_value_mark_arr[k1] = 1;
-
+            sql_s->world_offset_size[j*2] = world_offset_size[i*2];
+            sql_s->world_offset_size[j*2+1] =  world_offset_size[i*2+1];
+//            if()
             j++;
-            k1++;
         }
-        else
-            //if(j==(split_count/2)||world_offset_size[i*2]<split_index[j*2])
-        {
-            if(world_offset_size[i*2]==-1){
-                i++;
-                continue;
+        sql_s->world_length = j;
+    }else{
+        while((i!=world_count||j<(split_count/2))){
+            if(j<(split_count/2)&&(i==world_count||world_offset_size[i*2]>split_index[j*2])){
+                // 排除空字符串
+                if(split_index[j*2+1]-split_index[j*2]-1==0){
+                    j++;
+                    continue;
+                }
+
+                sql_s->world_offset_size[k1*2] = split_index[j*2]+1;
+                sql_s->world_offset_size[k1*2+1] = split_index[j*2+1]-split_index[j*2]-1;
+
+                sql_s->str_value_mark_arr[k1] = 1;
+
+                j++;
+                k1++;
             }
-            sql_s->world_offset_size[k1*2] = world_offset_size[i*2];
-            sql_s->world_offset_size[k1*2+1] =  world_offset_size[i*2+1];
-            i++;
-            k1++;
+            else
+            {
+                if(world_offset_size[i*2]==-1){
+                    i++;
+                    continue;
+                }
+
+                sql_s->world_offset_size[k1*2] = world_offset_size[i*2];
+                sql_s->world_offset_size[k1*2+1] =  world_offset_size[i*2+1];
+                i++;
+                k1++;
+            }
         }
+
+        sql_s->world_length = k1;
     }
     // free mem
     free(world_offset_size);
@@ -202,12 +252,19 @@ int pare_sql_from_string(struct SQL_STRUCTURE * sql_s){
     sql_s->can_be_used = 1;
     switch (get_str_hash(sql_s->full_sql + sql_s->world_offset_size[0], sql_s->world_offset_size[1])) {
         case S_KW_CREATE:
-            switch (get_str_hash(sql_s->full_sql + sql_s->world_offset_size[0], sql_s->world_offset_size[1])) {
+            switch (get_str_hash(sql_s->full_sql + sql_s->world_offset_size[1*2], sql_s->world_offset_size[1*2+1])) {
                 case S_KW_DATABASE:
+                    if(sql_s->world_length<3)
+                        return 1;
 
+                    tmp_string1 = calloc(sql_s->world_offset_size[2 * 2 + 1] + 1, sizeof(char));
+                    memcpy(tmp_string1, sql_s->full_sql + sql_s->world_offset_size[2 * 2], sql_s->world_offset_size[2 * 2 + 1]);
+                    tmp_string1[sql_s->world_offset_size[2 * 2 + 1]] = '\0';
+                    create_database(tmp_string1);
+                    free(tmp_string1);
                     break;
                 case S_KW_TABLE:
-                    rlt = parse_create_table_from_sql(sql_s);
+                    rlt = parse_create_table_from_sql(sql_s, base);
                     if(rlt)
                         return rlt;
                     break;
@@ -216,17 +273,89 @@ int pare_sql_from_string(struct SQL_STRUCTURE * sql_s){
             }
             break;
         case S_KW_DROP:
-            break;
         case S_KW_USE:
             break;
         case S_KW_ALTER:
+            if(sql_s->world_length < 4||base->name[0]==0)
+                return 1;
+            switch (get_str_hash(sql_s->full_sql + sql_s->world_offset_size[3*2], sql_s->world_offset_size[3*2+1])) {
+                case S_KW_RENAME:
+                    // rename table name
+//                    if(sql_s->world_length==6){
+//
+//                        // table name
+//                        tmp_string1 = calloc(sql_s->world_offset_size[2 * 2 + 1] + 1, sizeof(char));
+//                        memcpy(tmp_string1, sql_s->full_sql + sql_s->world_offset_size[2 * 2], sql_s->world_offset_size[2 * 2 + 1]);
+//                        tmp_string1[sql_s->world_offset_size[2 * 2 + 1]] = '\0';
+//
+//                        // new table name
+//                        tmp_string2 = calloc(sql_s->world_offset_size[2 * 5 + 1] + 1, sizeof(char));
+//                        memcpy(tmp_string2, sql_s->full_sql + sql_s->world_offset_size[2 * 5], sql_s->world_offset_size[2 * 5 + 1]);
+//                        tmp_string2[sql_s->world_offset_size[2 * 5 + 1]] = '\0';
+//
+//                        if((fp= fopen(base->name, "r+b"))==0){
+//                            free(tmp_string1);
+//                            free(tmp_string2);
+//                            tmp_string1 =  0; tmp_string2 = 0;
+//                            return 1;
+//                        }
+//                        rlt = m_rename_table(fp, base, tmp_string1, tmp_string2);
+//                        free(tmp_string1);
+//                        free(tmp_string2);
+//                        tmp_string1 =  0; tmp_string2 = 0;
+//                        fclose(fp);
+//                        if(rlt)
+//                            return rlt;
+//                    }
+//                    else if(sql_s->world_length==8){
+//                        // table name
+//                        tmp_string1 = calloc(sql_s->world_offset_size[2 * 2 + 1] + 1, sizeof(char));
+//                        memcpy(tmp_string1, sql_s->full_sql + sql_s->world_offset_size[2 * 2], sql_s->world_offset_size[2 * 2 + 1]);
+//                        tmp_string1[sql_s->world_offset_size[2 * 2 + 1]] = '\0';
+//
+//                        // field name
+//                        tmp_string2 = calloc(sql_s->world_offset_size[2 * 5 + 1] + 1, sizeof(char));
+//                        memcpy(tmp_string2, sql_s->full_sql + sql_s->world_offset_size[2 * 5], sql_s->world_offset_size[2 * 5 + 1]);
+//                        tmp_string2[sql_s->world_offset_size[2 * 5 + 1]] = '\0';
+//
+//                        // new field name
+//                        tmp_string2 = calloc(sql_s->world_offset_size[2 * 7 + 1] + 1, sizeof(char));
+//                        memcpy(tmp_string2, sql_s->full_sql + sql_s->world_offset_size[2 * 7], sql_s->world_offset_size[2 * 7 + 1]);
+//                        tmp_string2[sql_s->world_offset_size[2 * 7 + 1]] = '\0';
+//
+//                        if((fp= fopen(base->name, "r+b"))==0){
+//                            free(tmp_string1);
+//                            free(tmp_string2);
+//                            free(tmp_string3);
+//                            tmp_string1 =  0; tmp_string2 = 0; tmp_string3 = 0;
+//                            return 1;
+//                        }
+//                        rlt = m_rename_field(fp, base,
+//                                             get_field_id_by_pure_name(base, tmp_string1, tmp_string2),
+//                                             tmp_string3);
+//                        free(tmp_string1);
+//                        free(tmp_string2);
+//                        free(tmp_string3);
+//                        tmp_string1 =  0; tmp_string2 = 0; tmp_string3 = 0;
+//                        fclose(fp);
+//                        if(rlt)
+//                            return rlt;
+//                    }
+                    break;
+                case S_KW_ADD:
+                    break;
+                case S_KW_DROP:
+
+                    break;
+                default:
+                    sql_s->can_be_used = 0;
+            }
             break;
         case S_KW_SELECT:
-            rlt = parse_select_from_sql(sql_s);
-            if(rlt)
-                return rlt;
+            rlt = parse_select_from_sql(sql_s, base);
             break;
         case S_KW_INSERT:
+            rlt = parse_insert_from_sql(sql_s, base);
             break;
         case S_KW_UPDATE:
             break;
@@ -235,156 +364,32 @@ int pare_sql_from_string(struct SQL_STRUCTURE * sql_s){
         default:
             sql_s->can_be_used = 0;
     }
-    return -1;
+    return rlt;
 }
 
 void free_sql_structure(struct SQL_STRUCTURE * sql_s){
 
 }
 
-
-/**
- * python code
-import re
-
-def _hash(v: str):
-    rlt = 0
-    for i1, i in enumerate(v.upper()):
-        rlt += (i1+1) * ord(i)
-    return rlt
-
-
-l1 = re.findall(r'\w+', s0)
-l2 = [_hash(i[5:]) for i in l1]
-s0 = ''
-for i, j in zip(l1, l2):
-    s0 += f"{i}={hex(j)},\n"
-print(s0)
-print(len(set(l2))==len(l2) and 42 not in l2)
- *
- *
- * @param s1
- * @param str_len
- * @return
- */
-int get_str_hash(const char* s1, int str_len){
-    int i=0;
-    int rlt = 0;
-    for(;i<str_len;i++){
-        rlt += (i+1) * toupper(s1[i]);
-        printf("%d\n", toupper(s1[i]));
-    }
-    return rlt;
-}
-
 int learn_regex(){
 
     printf("%d\n", get_str_hash("*", 1));
-/** 待匹配字符串 */
-    char inputstr[128] = "'hello,'111\\'wel(come) '222'to my party";
-//    printf("%d", inputstr[0]);
-//    scanf("%s", inputstr);
+    /** 待匹配字符串 */
+    char inputstr[128] = "'hello,'111\\'wel(come) '**222'to my party";
     /** regex 错误输出缓冲区 */
     char regerrbuf[256];
     regex_t reg;
     /** 正则表达式 */
-    const char* pattern = "[()]"; //  [^\]'
+    const char* pattern = "(\\w+)|([*+-/%=!><]+)"; //  [^\]'
     int match_offset_size[200];
     int match_length = 0;
     int i=0;
-    match_length = count_appeared_nu(inputstr, pattern, match_offset_size, 1);
+    match_length = count_appeared_nu(inputstr, pattern, match_offset_size, 0);
 
     printf("match_length: %d\n", match_length);
     for(;i<match_length;i++)
         printf("%d:%d\n", match_offset_size[i*2], match_offset_size[i*2+1]);
 
-    return 0;
-    printf("==GNU Regex Test==\n");
-    printf("Pattern     :%s\n", pattern);
-    printf("Input String:%s\n", inputstr);
-    /************************************************************************/
-    /* 编译正则表达式,编译成功的 regex_t 对象才可以被后续的 regexec 使用    */
-    /************************************************************************/
-    int c = regcomp(&reg, pattern, REG_EXTENDED);
-    if (0 != c)
-    {
-        /************************************************************************/
-        /*  正则表达式编译出错输出错误信息                                      */
-        /*  调用 regerror 将错误信息输出到 regerrbuf 中                         */
-        /*  regerrbuf 末尾置0,确保上面调用regerror 导致 regerrbuf 溢出的情况下, */
-        /*  字符串仍有有结尾0                                                   */
-        /*  然后 printf 输出                                                    */
-        /************************************************************************/
-        regerror(c, &reg, regerrbuf, sizeof(regerrbuf));
-        regerrbuf[sizeof(regerrbuf) - 1] = '\0';
-        printf("%s\n", regerrbuf);
-        return -1;
-    }
-    /************************************************************************/
-    /* 记录匹配位置的 regmatch_t 数组                                       */
-    /* 上面的正则表达有 2 个捕获组,加上默认组(group 0),                     */
-    /* 为了记录所有捕获组位置,所以这里需要长度为 3 的 regmatch_t 数组       */
-    /************************************************************************/
-    const size_t matchsz = 3;
-    regmatch_t pmatch[3];
-    /** 起始匹配的偏移量 */
-    size_t offset = 0;
-    /** 捕获计数         */
-    int matchcount = 0;
-    /************************************************************************/
-    /* regexec 不能通过一次调用找到字符串中所有满足匹配条件的字符串位置,    */
-    /* 所以需要通过步进偏移的方式循环查找字符串中所有匹配的字符串,          */
-    /* 每一次匹配的起始偏移是上一次匹配到的字符串结束偏移                   */
-    /************************************************************************/
-    do {
-        printf("Search start %d\n",(int)offset);
-        /** 正则表达式匹配的起始地址 */
-        const char* p = inputstr + offset;
-        /************************************************************************/
-        /* regmatch_t 用于记录正则表达匹配的结果,每一个 regmatch_t 记录一个捕获 */
-        /* 组(catch group)的在字符串中的起始位置。                              */
-        /* 如果调用 regexec 时如果不提供 regmatch_t(nmatch为0,pmatch为NULL),    */
-        /* 或者提供的 regmatch_t 数组长小于正则表达式中全部捕获组的数量,        */
-        /* regexec 也能正常匹配,只是无法记录匹配的位置                          */
-        /* 或不能完全记录所有的匹配结果                                         */
-        /************************************************************************/
-        c = regexec(&reg, p, matchsz, pmatch, 0);
-        if (REG_NOMATCH == c)
-        {
-            /** 没有找到匹配结束循环 */
-            printf("MATCH FINISHED\n");
-            break;
-        }
-        else if (0 == c)
-        {
-            /** 找到匹配,则输出匹配到的所有捕获组(catch group) */
-            printf("%d MATCH (%d-%d)\n", ++matchcount, pmatch[0].rm_so, pmatch[0].rm_eo);
-            for (int i = 0; i < matchsz; ++i)
-            {
-                printf("group %d :<<", i);
-//                print_str(p, pmatch[i].rm_so, pmatch[i].rm_eo);
-                printf(">>\n");
-            }
-            /************************************************************************/
-            /* 使用整体匹配捕获组0(group 0)的结束位置的更新偏移量,                  */
-            /* 下一次匹配从当前匹配的结束位置开始                                   */
-            /************************************************************************/
-            offset += pmatch[0].rm_eo;
-            continue;
-        }
-        else
-        {
-            /************************************************************************/
-            /** regexec 调用出错输出错误信息,结束循环                               */
-            /************************************************************************/
-            regerror(c, &reg, regerrbuf, sizeof(regerrbuf));
-            regerrbuf[sizeof(regerrbuf) - 1] = '\0';
-            printf("%s\n", regerrbuf);
-            break;
-        }
-    } while (1);
-    printf("%d MATCH FOUND\n", matchcount);
-    regfree(&reg);
     return 0;
 
 }
