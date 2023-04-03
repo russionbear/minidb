@@ -610,6 +610,11 @@ int run_sql(char* input_str, struct sql_transaction_manager* tx_manager, void* r
     int rlt;
     struct D_base* base = &tx_manager->base;
     struct SQL_STRUCTURE *sql_s = calloc(1, sizeof(struct SQL_STRUCTURE));
+    struct tx_result_select * t_result = (struct tx_result_select *)result;
+
+    if(input_str[0]=='i'){
+        puts("90");
+    }
     sql_s->full_sql = input_str;
     sql_s->full_sql_length = (int)strlen(input_str);
 
@@ -619,6 +624,7 @@ int run_sql(char* input_str, struct sql_transaction_manager* tx_manager, void* r
 
     print_re_worlds(sql_s->world_length, sql_s->world_offset_size, sql_s->full_sql);
 
+    t_result->type = get_str_hash(sql_s->full_sql + sql_s->world_offset_size[2 * 0 + 0], sql_s->world_offset_size[2 * 0 + 1]);
     switch (get_str_hash(sql_s->full_sql + sql_s->world_offset_size[2 * 0 + 0], sql_s->world_offset_size[2 * 0 + 1])) {
         case S_KW_CREATE:
             switch (get_str_hash(sql_s->full_sql + sql_s->world_offset_size[1*2], sql_s->world_offset_size[1*2+1])) {
@@ -699,6 +705,8 @@ int print_view_data(struct D_field* fields, int field_len, struct tx_result_sele
     int i=0, j;
     int offset=0;
     char tmp_string[MAX_STRING_LENGTH];
+    if(view_data==0)
+        return 1;
     for(;i<view_data->num;i++){
         for(j=0;j<field_len;j++){
             printf("%s=", fields[j].name);

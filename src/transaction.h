@@ -127,6 +127,7 @@ struct sql_transaction_manager{
 
 struct tx_result_select{
     int num;
+    enum Q_OPERA_TYPE type;
     u_int8_t * data;
 };
 

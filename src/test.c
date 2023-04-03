@@ -3,6 +3,7 @@
 #include <syslog.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "utils.h"
 #include "reactor.h"
@@ -146,10 +147,11 @@ int test_m_table(){
 int test_tx_table(){
     int rlt;
     struct sql_transaction_manager tx_manager;
+    struct tx_result_select result;
     // sql parse
     char* s1 = "create database ui";
     printf("%s\n", s1);
-    rlt = run_sql(s1, &tx_manager, 0);
+    rlt = run_sql(s1, &tx_manager, &result);
     if(rlt){
         printf("%d\n", rlt);
         return rlt;
@@ -158,7 +160,7 @@ int test_tx_table(){
 
     s1 = "use ui";
     printf("%s\n", s1);
-    rlt = run_sql(s1, &tx_manager, 0);
+    rlt = run_sql(s1, &tx_manager, &result);
     if(rlt){
         printf("%d\n", rlt);
         return rlt;
@@ -167,7 +169,7 @@ int test_tx_table(){
 
     s1 = "create table stu(id int default 8 unique primary key auto_increment, 'name' string(16))";
     printf("%s\n", s1);
-    rlt = run_sql(s1, &tx_manager, 0);
+    rlt = run_sql(s1, &tx_manager, &result);
     if(rlt){
         printf("%d\n", rlt);
         return rlt;
@@ -176,7 +178,7 @@ int test_tx_table(){
 
     s1 = "alter table ui rename to stu_new";
     printf("%s\n", s1);
-    rlt = run_sql(s1, &tx_manager, 0);
+    rlt = run_sql(s1, &tx_manager, &result);
     if(rlt){
         printf("%d\n", rlt);
         return rlt;
@@ -186,7 +188,7 @@ int test_tx_table(){
 
     s1 = "alter table stu_new add grade int unique";
     printf("%s\n", s1);
-    rlt = run_sql(s1, &tx_manager, 0);
+    rlt = run_sql(s1, &tx_manager, &result);
     if(rlt){
         printf("%d\n", rlt);
         return rlt;
@@ -195,7 +197,7 @@ int test_tx_table(){
 
     s1 = "alter table stu_new rename column grade to grade_new";
     printf("%s\n", s1);
-    rlt = run_sql(s1, &tx_manager, 0);
+    rlt = run_sql(s1, &tx_manager, &result);
     if(rlt){
         printf("%d\n", rlt);
         return rlt;
@@ -204,7 +206,7 @@ int test_tx_table(){
 
     s1 = "alter table stu_new drop grade_new";
     printf("%s\n", s1);
-    rlt = run_sql(s1, &tx_manager, 0);
+    rlt = run_sql(s1, &tx_manager, &result);
     if(rlt){
         printf("%d\n", rlt);
         return rlt;
@@ -213,7 +215,7 @@ int test_tx_table(){
 
     s1 = "drop table stu_new";
     printf("%s\n", s1);
-    rlt = run_sql(s1, &tx_manager, 0);
+    rlt = run_sql(s1, &tx_manager, &result);
     if(rlt){
         printf("%d\n", rlt);
         return rlt;
@@ -221,10 +223,12 @@ int test_tx_table(){
     print_database(&tx_manager.base);
 }
 
+/* 测试insert，select*/
+
 int test_tx_page(){
     int rlt;
     struct sql_transaction_manager tx_manager;
-    struct tx_result_select view_data;
+    struct tx_result_select result;
     memset(&tx_manager.base, 0, sizeof(struct D_base));
     char* s1 = "drop database ui";
 //    don't delete this code block
@@ -238,7 +242,7 @@ int test_tx_page(){
     // sql parse
     s1 = "create database ui";
     printf("%s\n", s1);
-    rlt = run_sql(s1, &tx_manager, 0);
+    rlt = run_sql(s1, &tx_manager, &result);
     if(rlt){
         printf("%d\n", rlt);
         return rlt;
@@ -247,7 +251,7 @@ int test_tx_page(){
 
     s1 = "use ui";
     printf("%s\n", s1);
-    rlt = run_sql(s1, &tx_manager, 0);
+    rlt = run_sql(s1, &tx_manager, &result);
     if(rlt){
         printf("%d\n", rlt);
         return rlt;
@@ -256,7 +260,7 @@ int test_tx_page(){
 
     s1 = "create table stu(id int default 8 unique primary key auto_increment, 'name' string(16))";
     printf("%s\n", s1);
-    rlt = run_sql(s1, &tx_manager, 0);
+    rlt = run_sql(s1, &tx_manager, &result);
     if(rlt){
         printf("%d\n", rlt);
         return rlt;
@@ -265,7 +269,7 @@ int test_tx_page(){
 
     s1 = "insert into stu values(1, 'qwe'), (2, 'aaa'), (999, '998f')";
     printf("%s\n", s1);
-    rlt = run_sql(s1, &tx_manager, 0);
+    rlt = run_sql(s1, &tx_manager, &result);
     if(rlt){
         printf("%d\n", rlt);
         return rlt;
@@ -274,13 +278,14 @@ int test_tx_page(){
 
     s1 = "select * from stu;";
     printf("%s\n", s1);
-    rlt = run_sql(s1, &tx_manager, &view_data);
+    rlt = run_sql(s1, &tx_manager, &result);
     if(rlt){
         printf("%d\n", rlt);
         return rlt;
     }
+    free(s1);
     print_database(&tx_manager.base);
-    print_view_data(get_table_fields(&tx_manager.base, 1), 2, &view_data);
+    print_view_data(get_table_fields(&tx_manager.base, 1), 2, &result);
 }
 
 int test_opera(){
@@ -319,6 +324,68 @@ int test_opera(){
     return 0;
 }
 
+/* 测试线程池*/
+
+int test_thread_pool_task(void* v){
+    if(v==0)
+        return 1;
+    sleep(1);
+    printf("task: %d\n", *(int*)v);
+    free(v);
+}
+
+int test_thread_pool(){
+    int rlt;
+    int i;
+    int *number_p;
+    struct thread_pool_t thread_pool;
+    rlt = create_thread_pool(2, 10, 16, &thread_pool);
+    if(rlt){
+        destroy_thread_pool(&thread_pool);
+        return 1;
+    }
+    thread_pool.task_thread_body = (void *(*)(void *)) test_thread_pool_task;
+    start_thread_pool(&thread_pool);
+
+    i=0;
+    while(1){
+        i ++;
+        number_p = calloc(1, sizeof(int));
+        *number_p = i;
+        rlt = fifo_queue_put(thread_pool.task_queue, number_p, 0);
+        printf("%i, should_drop_res=%d, alive=%d, working=%d rlt=%d\n", i,
+               thread_pool.rest_drop_thread_num, thread_pool.alive_thr_num, thread_pool.working_thr_num, rlt);
+        if(i==20){
+            printf("123sdf sdf  sdf 89\n");
+            break;
+        }
+    }
+
+    pthread_join(thread_pool.daemon_tid, 0);
+}
+
+/* 测试db服务*/
+
+int test_db_server(){
+    int rlt;
+    struct db_server_t db_server;
+    struct tx_result_select result;
+    char* s0 = "use ui";
+    db_server.ip = "192.168.209.128";
+    db_server.port = 8088;
+    db_server.max_connection_num = 200;
+    db_server.tx_manager = calloc(1, sizeof(struct sql_transaction_manager));
+//    memset(&db_server.tx_manager->base, 0, sizeof(struct D_base));
+    rlt = init_db_server(&db_server);
+    if(rlt){
+        printf("%d\n", rlt);
+        return 1;
+    }
+    start_db_server(&db_server);
+    run_sql(s0, db_server.tx_manager, &result);
+    pthread_join(db_server.listen_thread_id, 0);
+}
+
 
 int main(int argc, char const *argv[])
 {
@@ -339,6 +406,8 @@ int main(int argc, char const *argv[])
 //    printf("%s, %s", a1, a2);
 //    test_equation();
 //    test_tx_table();
-    test_tx_page();
+//    test_tx_page();
+    test_db_server();
+//    test_thread_pool();
 }
 

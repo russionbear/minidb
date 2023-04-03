@@ -8,42 +8,54 @@
 #include "table.h"
 #include "utils.h"
 
-// tools
-
-struct dp_p_array{
-    int element_count;
-    int array_size;
-    void* data[0];
-};
-
-int dp_p_array_add_ele(int v);
-int dp_p_array_remove_ele(int v);
-int dp_p_array_pop(int index);
-int dp_p_array_clear();
+int get_socket_fd(char* ip, int port, int is_server);
 
 
-// lock
 
+// msg in,  result out
 
-struct DIS_TASK{
-    char is_read;
+struct task_connect_t{
+    struct db_server_t* db_sv;
+    int is_read;
+    int socket_fd;
+    int msg_type;
+    int msg_length;
+    char msg[0];
 };
 
 
-struct PAGE_DATA_LOCK{
-    pthread_spinlock_t lock;
-    struct dp_p_array task_arr;
-    struct dp_p_array page_wait_arr;
-    struct dp_p_array page_run_arr;
+struct db_server_t{
+    pthread_mutex_t lock;
 
-    // 0: read 1: write
-    char page_state[MAX_PAGE_NU];
+    char* ip;
+    int port;
+    int max_connection_num;
+    int current_connect_num;
+
+    struct sql_transaction_manager * tx_manager;
+
+    int listen_epoll_fd;
+    int listen_fd;
+    pthread_t listen_thread_id;
+    struct epoll_event* listen_events;
+
+    struct thread_pool_t connection_pool;
+    struct thread_pool_t worker_pool;
+
 };
 
+int init_db_server(struct db_server_t* db_sv);
 
-int daemon_thread_body(struct thread_pool_t* tp);
+int stop_db_server(struct db_server_t* db_sv);
 
-int worker_thread_body(struct thread_pool_t* tp);
+int start_db_server(struct db_server_t* db_sv);
+
+
+void listen_thread(struct db_server_t* db_sv);
+
+void socket_handler(struct task_connect_t* connect_t);
+
+void task_handler(struct task_connect_t* connect_t);
 
 int learn_thread();
 
