@@ -4,10 +4,10 @@
 
 #include "utils.h"
 #include <string.h>
-#include <unp.h>
 #include <ctype.h>
-
+#include <sys/types.h>
 #include <regex.h>
+
 
 inline int8_t b2int8 (u_int8_t *b_arr){ return (int8_t)b_arr[0]; }
 inline int16_t b2int16 (u_int8_t *b_arr){ return (int16_t )((b_arr[0] << 8) + (b_arr[1])); }
@@ -284,11 +284,11 @@ int create_thread_pool(int min_thr_num, int max_thr_num, struct thread_pool_t* t
     tp->max_thr_num = max_thr_num;
     tp->child_threads = calloc(max_thr_num, sizeof(pthread_t));
     tp->child_thread_cond = calloc(max_thr_num, sizeof(pthread_cond_t));
-    tp->child_thread_state = calloc(max_thr_num, sizeof(uint8_t));
+    tp->child_thread_state = calloc(max_thr_num, sizeof(u_int8_t));
 
-    if(pthread_mutex_init(&(tp->lock), NULL) != 0||
-            pthread_cond_init(&tp->task_empty, NULL) != 0||
-            pthread_cond_init(&tp->task_full, NULL) != 0
+    if(pthread_mutex_init(&(tp->lock), 0) != 0||
+            pthread_cond_init(&tp->task_empty, 0) != 0||
+            pthread_cond_init(&tp->task_full, 0) != 0
     ){
         return 1;
     }
@@ -312,30 +312,70 @@ int start_thread_pool(struct thread_pool_t* tp){
     if(!tp->is_ready)
         return 1;
     for(i=0;i<tp->min_thr_num;i++){
-        pthread_create(&(tp->child_threads[i]), NULL, (void *(*)(void *)) (tp->child_thread_body), (void *)tp);
+        pthread_create(&(tp->child_threads[i]), 0, (void *(*)(void *)) (tp->child_thread_body), (void *)tp);
     }
 //    pthread_create(&(tp->daemon_tid), NULL, (void *(*)(void *)) tp->daemon_thread_body, (void *)tp);
     tp->daemon_thread_body(tp);
+    tp->alive_thr_num = tp->min_thr_num;
+    tp->step_thr_num = 5;
     return 0;
 }
 
 
+/**
+ *
+ * @param tp
+ * @return
+ */
+int refresh_thread_num(struct thread_pool_t* tp){
+    int refresh_nu;
+    int alive_area_id = tp->alive_thr_num / tp->step_thr_num;
+    int work_area_id = tp->working_thr_num / tp->step_thr_num;
+    int i;
+
+    if(tp->rest_drop_nu!=0)
+        return 0;
+
+    if(tp->working_thr_num==tp->alive_thr_num)
+        refresh_nu = 1;
+    else if(alive_area_id==work_area_id)
+        return 1;
+    else if((alive_area_id-work_area_id)==1&&tp->alive_thr_num-tp->working_thr_num==1)
+        return 1;
+    else if(tp->min_thr_num/tp->step_thr_num>=work_area_id)
+        return 1;
+    else
+        refresh_nu = alive_area_id-work_area_id;
+
+    if(refresh_nu>0){
+        for(i=tp->working_thr_num;i<tp->working_thr_num+tp->step_thr_num;i++){
+            pthread_create(&(tp->child_threads[i]), 0,
+                           (void *(*)(void *)) (tp->child_thread_body), (void *)tp);
+        }
+        tp->alive_thr_num += tp->step_thr_num;
+    }else{
+        tp->rest_drop_nu = -tp->step_thr_num * refresh_nu;
+    }
+
+    return 0;
+}
+
 int free_thread_pool(struct thread_pool_t* tp){
     int i;
 
-    for(i=0;i<tp->max_thr_num;i++){
-        if(tp->child_threads[i]){
-            pthread_cond_destroy(&tp->child_thread_cond[i]);
-        }
-    }
+//    for(i=0;i<tp->max_thr_num;i++){
+//        if(tp->child_threads[i]){
+//            pthread_cond_destroy(&tp->child_thread_cond[i]);
+//        }
+//    }
 
     pthread_mutex_destroy(&tp->lock);
     pthread_cond_destroy(&tp->task_empty);
     pthread_cond_destroy(&tp->task_full);
     if(tp->child_threads)
         free(tp->child_threads);
-    if(tp->child_thread_cond)
-        free(tp->child_thread_cond);
+//    if(tp->child_thread_cond)
+//        free(tp->child_thread_cond);
     if(tp->child_thread_state)
         free(tp->child_thread_state);
     tp->is_ready = 0;
@@ -355,5 +395,35 @@ int destroy_thread_pool(struct thread_pool_t* tp){
     }
     free_thread_pool(tp);
     free(tp);
+}
+
+
+void master_thread_body(struct thread_pool_t* tp){
+
+}
+void worker_threader_body(struct thread_pool_t* tp){
+    void* task;
+    int i =0;
+    pthread_t self_pid = pthread_self();
+
+    while(1){
+        // 是否释放该thread
+        pthread_mutex_lock(&tp->lock);
+        for(i=1;i<= tp->rest_drop_nu;i ++){
+            if(tp->child_threads[tp->alive_thr_num-i] == self_pid){
+                tp->rest_drop_nu --;
+                tp->child_threads[tp->alive_thr_num-i] = 0;
+                pthread_mutex_unlock(&tp->lock);
+                return;
+            }
+        }
+        pthread_mutex_unlock(&tp->lock);
+
+        // get task
+        task = fifo_queue_get(&tp->task_queue, 0);
+
+        // run task
+        tp->task_thread_body(task);
+    }
 }
 

@@ -107,19 +107,24 @@ struct thread_pool_t{
 
     void *(*daemon_thread_body)(struct thread_pool_t *);
     void *(*child_thread_body)(struct thread_pool_t *);
+    void *(*task_thread_body)(void *);
+
 
     pthread_t *child_threads;                   /* 存放线程的tid,实际上就是管理了线 数组 */
-    pthread_cond_t *child_thread_cond;
     u_int8_t *child_thread_state; // 1 or task_id: is working
     pthread_cond_t task_empty, task_full;
 
+    int rest_drop_nu;
     int working_thr_num;                     /* 忙线程，正在工作的线程 */
     int min_thr_num;                      /* 线程池中最小线程数 */
+    int step_thr_num;
     int max_thr_num;                      /* 线程池中最大线程数 */
-    int current_thr_num;                     /* 线程池中存活的线程数 */
+    int alive_thr_num;                     /* 线程池中存活的线程数 */
 
     u_int8_t is_ready;
     u_int8_t is_running;                         /* true为关闭 */
+
+    struct fifo_queue_t task_queue;
 };
 
 int create_thread_pool(int min_thr_num, int max_thr_num, struct thread_pool_t* tp);
@@ -130,8 +135,11 @@ int create_thread_pool(int min_thr_num, int max_thr_num, struct thread_pool_t* t
  * @return
  */
 int start_thread_pool(struct thread_pool_t* tp);
+int refresh_thread_num(struct thread_pool_t* tp);
 int free_thread_pool(struct thread_pool_t* tp);
 int destroy_thread_pool(struct thread_pool_t* tp);
 
+void master_thread_body(struct thread_pool_t* tp);
+void worker_threader_body(struct thread_pool_t* tp);
 
 #endif //MINIDB_UTILS_H
