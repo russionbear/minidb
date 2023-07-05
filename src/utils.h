@@ -1,5 +1,6 @@
 //
 // Created by Administrator on 3/26/2023.
+// 
 //
 
 #ifndef MINIDB_UTILS_H
@@ -8,6 +9,10 @@
 #include <stdlib.h>
 #include <pthread.h>
 #define MAX_CHILD_THREAD_NUM 1024
+
+//////////////////////////////////////////////////
+// 定义并统一数据类型， Window 平台需要进行以下定义//
+/////////////////////////////////////////////////
 
 //typedef   signed          char int8_t;
 //typedef   short    int16_t;
@@ -21,6 +26,9 @@
 
 typedef   float float32_t;
 typedef   double float64_t;
+
+// 实现 u_int8_t* 与各类型的相互转换
+
 
 int8_t b2int8 (u_int8_t *b_arr);
 int16_t b2int16 (u_int8_t *b_arr);
